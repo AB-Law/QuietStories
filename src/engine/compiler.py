@@ -4,7 +4,9 @@ Scenario compiler - converts specs to executable tools
 
 from typing import Dict, Any, List
 from langchain.tools import BaseTool
-from ..schemas import ScenarioSpec, Action
+from src.schemas import ScenarioSpec, Action
+from src.utils.jsonlogic import JSONLogicEvaluator
+from src.schemas.outcome import StateChange
 
 
 class ScenarioCompiler:
@@ -55,7 +57,6 @@ class ScenarioCompiler:
             def _check_preconditions(self, preconditions: Dict[str, Any]) -> bool:
                 """Check action preconditions"""
                 try:
-                    from ..utils.jsonlogic import JSONLogicEvaluator
                     evaluator = JSONLogicEvaluator()
                     # Get current state from the orchestrator
                     current_state = getattr(self, '_current_state', {})
@@ -66,7 +67,6 @@ class ScenarioCompiler:
             def _execute_effects(self, effects: List[Dict[str, Any]]) -> str:
                 """Execute action effects"""
                 try:
-                    from ..schemas.outcome import StateChange
                     # Convert effects to StateChange objects and apply them
                     state_changes = [StateChange(**effect) for effect in effects]
                     # In production, this would update the actual game state

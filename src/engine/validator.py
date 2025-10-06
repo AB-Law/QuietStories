@@ -5,8 +5,9 @@ Scenario validator with Monte Carlo simulation for auto-balancing
 import random
 import json
 from typing import Dict, Any, List, Tuple
-from ..schemas import ScenarioSpec, validate_scenario_spec
-from ..config import settings
+from src.schemas import ScenarioSpec, validate_scenario_spec
+from src.config import settings
+from src.utils.jsonlogic import JSONLogicEvaluator
 
 
 class ScenarioValidator:
@@ -136,7 +137,6 @@ class ScenarioValidator:
     def _evaluate_condition(self, condition: Dict[str, Any], state: Dict[str, Any]) -> bool:
         """Evaluate a JSONLogic condition against the current state"""
         try:
-            from ..utils.jsonlogic import JSONLogicEvaluator
             evaluator = JSONLogicEvaluator()
             return evaluator.evaluate_condition(condition, state)
         except Exception:
@@ -155,17 +155,90 @@ class ScenarioValidator:
         new_state = state.copy()
         
         for effect in effects:
-            # This is a simplified implementation
-            # In practice, you'd implement proper JSON pointer path resolution
-            if effect.op == "set":
-                # Set a value at the path
-                pass
-            elif effect.op == "inc":
-                # Increment a value at the path
-                pass
-            # ... other operations
+            op = effect.op
+            path = effect.path
+            value = effect.value
+            
+            if op == "set":
+                self._set_value_at_path(new_state, path, value)
+            elif op == "inc":
+                current_value = self._get_value_at_path(new_state, path)
+                self._set_value_at_path(new_state, path, current_value + value)
+            elif op == "dec":
+                current_value = self._get_value_at_path(new_state, path)
+                self._set_value_at_path(new_state, path, current_value - value)
+            elif op == "mul":
+                current_value = self._get_value_at_path(new_state, path)
+                self._set_value_at_path(new_state, path, current_value * value)
+            elif op == "patch":
+                current_value = self._get_value_at_path(new_state, path)
+                if isinstance(current_value, dict) and isinstance(value, dict):
+                    current_value.update(value)
+                    self._set_value_at_path(new_state, path, current_value)
+            elif op == "push":
+                current_value = self._get_value_at_path(new_state, path)
+                if isinstance(current_value, list):
+                    current_value.append(value)
+                    self._set_value_at_path(new_state, path, current_value)
+            elif op == "pop":
+                current_value = self._get_value_at_path(new_state, path)
+                if isinstance(current_value, list) and len(current_value) > 0:
+                    current_value.pop()
+                    self._set_value_at_path(new_state, path, current_value)
+            elif op == "addlog":
+                log_path = path if path else "log"
+                current_log = self._get_value_at_path(new_state, log_path)
+                if isinstance(current_log, list):
+                    current_log.append(value)
+                    self._set_value_at_path(new_state, log_path, current_log)
+                else:
+                    self._set_value_at_path(new_state, log_path, [value])
+            else:
+                raise NotImplementedError(f"Effect operation '{op}' not implemented")
         
         return new_state
+    
+    def _get_value_at_path(self, state: Dict[str, Any], path: str) -> Any:
+        """Get value at JSON pointer path"""
+        if not path or path == "":
+            return state
+        
+        parts = path.split(".")
+        current = state
+        
+        for part in parts:
+            if part.startswith("[") and part.endswith("]"):
+                index = int(part[1:-1])
+                current = current[index]
+            else:
+                current = current.get(part, {})
+        
+        return current
+    
+    def _set_value_at_path(self, state: Dict[str, Any], path: str, value: Any):
+        """Set value at JSON pointer path"""
+        if not path or path == "":
+            state.update(value)
+            return
+        
+        parts = path.split(".")
+        current = state
+        
+        for i, part in enumerate(parts[:-1]):
+            if part.startswith("[") and part.endswith("]"):
+                index = int(part[1:-1])
+                current = current[index]
+            else:
+                if part not in current:
+                    current[part] = {}
+                current = current[part]
+        
+        final_part = parts[-1]
+        if final_part.startswith("[") and final_part.endswith("]"):
+            index = int(final_part[1:-1])
+            current[index] = value
+        else:
+            current[final_part] = value
     
     def auto_repair(self, spec_data: Dict[str, Any], issues: List[str]) -> Dict[str, Any]:
         """Attempt to auto-repair a scenario specification"""

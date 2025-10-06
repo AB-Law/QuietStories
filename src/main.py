@@ -4,9 +4,9 @@ FastAPI application for the Dynamic CYOA Engine
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from .config import settings
-from .api.scenarios import router as scenarios_router
-from .api.sessions import router as sessions_router
+from src.config import settings
+from src.api.scenarios import router as scenarios_router
+from src.api.sessions import router as sessions_router
 
 # Create FastAPI app
 app = FastAPI(

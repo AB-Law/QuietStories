@@ -178,15 +178,89 @@ class MonteCarloSimulator:
     def _apply_event_effects(self, event, state: Dict[str, Any]):
         """Apply event effects to state"""
         
-        # Simplified effect application - in production, implement proper state updates
         for effect in event.effects:
-            if effect.op == "set":
-                # Set value at path
-                pass
-            elif effect.op == "inc":
-                # Increment value at path
-                pass
-            # ... other operations
+            op = effect.op
+            path = effect.path
+            value = effect.value
+            
+            if op == "set":
+                self._set_value_at_path(state, path, value)
+            elif op == "inc":
+                current_value = self._get_value_at_path(state, path)
+                self._set_value_at_path(state, path, current_value + value)
+            elif op == "dec":
+                current_value = self._get_value_at_path(state, path)
+                self._set_value_at_path(state, path, current_value - value)
+            elif op == "mul":
+                current_value = self._get_value_at_path(state, path)
+                self._set_value_at_path(state, path, current_value * value)
+            elif op == "patch":
+                current_value = self._get_value_at_path(state, path)
+                if isinstance(current_value, dict) and isinstance(value, dict):
+                    current_value.update(value)
+                    self._set_value_at_path(state, path, current_value)
+            elif op == "push":
+                current_value = self._get_value_at_path(state, path)
+                if isinstance(current_value, list):
+                    current_value.append(value)
+                    self._set_value_at_path(state, path, current_value)
+            elif op == "pop":
+                current_value = self._get_value_at_path(state, path)
+                if isinstance(current_value, list) and len(current_value) > 0:
+                    current_value.pop()
+                    self._set_value_at_path(state, path, current_value)
+            elif op == "addlog":
+                log_path = path if path else "log"
+                current_log = self._get_value_at_path(state, log_path)
+                if isinstance(current_log, list):
+                    current_log.append(value)
+                    self._set_value_at_path(state, log_path, current_log)
+                else:
+                    self._set_value_at_path(state, log_path, [value])
+            else:
+                raise NotImplementedError(f"Effect operation '{op}' not implemented")
+    
+    def _get_value_at_path(self, state: Dict[str, Any], path: str) -> Any:
+        """Get value at JSON pointer path"""
+        if not path or path == "":
+            return state
+        
+        parts = path.split(".")
+        current = state
+        
+        for part in parts:
+            if part.startswith("[") and part.endswith("]"):
+                index = int(part[1:-1])
+                current = current[index]
+            else:
+                current = current.get(part, {})
+        
+        return current
+    
+    def _set_value_at_path(self, state: Dict[str, Any], path: str, value: Any):
+        """Set value at JSON pointer path"""
+        if not path or path == "":
+            state.update(value)
+            return
+        
+        parts = path.split(".")
+        current = state
+        
+        for i, part in enumerate(parts[:-1]):
+            if part.startswith("[") and part.endswith("]"):
+                index = int(part[1:-1])
+                current = current[index]
+            else:
+                if part not in current:
+                    current[part] = {}
+                current = current[part]
+        
+        final_part = parts[-1]
+        if final_part.startswith("[") and final_part.endswith("]"):
+            index = int(final_part[1:-1])
+            current[index] = value
+        else:
+            current[final_part] = value
     
     def _get_available_actions(self, actions: List, state: Dict[str, Any]) -> List:
         """Get actions that are available given current state"""
@@ -231,12 +305,86 @@ class MonteCarloSimulator:
     def _apply_action_effects(self, action, state: Dict[str, Any]):
         """Apply action effects to state"""
         
-        # Simplified effect application - in production, implement proper state updates
         for effect in action.effects:
-            if effect.op == "set":
-                # Set value at path
-                pass
-            elif effect.op == "inc":
-                # Increment value at path
-                pass
-            # ... other operations
+            op = effect.op
+            path = effect.path
+            value = effect.value
+            
+            if op == "set":
+                self._set_value_at_path(state, path, value)
+            elif op == "inc":
+                current_value = self._get_value_at_path(state, path)
+                self._set_value_at_path(state, path, current_value + value)
+            elif op == "dec":
+                current_value = self._get_value_at_path(state, path)
+                self._set_value_at_path(state, path, current_value - value)
+            elif op == "mul":
+                current_value = self._get_value_at_path(state, path)
+                self._set_value_at_path(state, path, current_value * value)
+            elif op == "patch":
+                current_value = self._get_value_at_path(state, path)
+                if isinstance(current_value, dict) and isinstance(value, dict):
+                    current_value.update(value)
+                    self._set_value_at_path(state, path, current_value)
+            elif op == "push":
+                current_value = self._get_value_at_path(state, path)
+                if isinstance(current_value, list):
+                    current_value.append(value)
+                    self._set_value_at_path(state, path, current_value)
+            elif op == "pop":
+                current_value = self._get_value_at_path(state, path)
+                if isinstance(current_value, list) and len(current_value) > 0:
+                    current_value.pop()
+                    self._set_value_at_path(state, path, current_value)
+            elif op == "addlog":
+                log_path = path if path else "log"
+                current_log = self._get_value_at_path(state, log_path)
+                if isinstance(current_log, list):
+                    current_log.append(value)
+                    self._set_value_at_path(state, log_path, current_log)
+                else:
+                    self._set_value_at_path(state, log_path, [value])
+            else:
+                raise NotImplementedError(f"Effect operation '{op}' not implemented")
+    
+    def _get_value_at_path(self, state: Dict[str, Any], path: str) -> Any:
+        """Get value at JSON pointer path"""
+        if not path or path == "":
+            return state
+        
+        parts = path.split(".")
+        current = state
+        
+        for part in parts:
+            if part.startswith("[") and part.endswith("]"):
+                index = int(part[1:-1])
+                current = current[index]
+            else:
+                current = current.get(part, {})
+        
+        return current
+    
+    def _set_value_at_path(self, state: Dict[str, Any], path: str, value: Any):
+        """Set value at JSON pointer path"""
+        if not path or path == "":
+            state.update(value)
+            return
+        
+        parts = path.split(".")
+        current = state
+        
+        for i, part in enumerate(parts[:-1]):
+            if part.startswith("[") and part.endswith("]"):
+                index = int(part[1:-1])
+                current = current[index]
+            else:
+                if part not in current:
+                    current[part] = {}
+                current = current[part]
+        
+        final_part = parts[-1]
+        if final_part.startswith("[") and final_part.endswith("]"):
+            index = int(final_part[1:-1])
+            current[index] = value
+        else:
+            current[final_part] = value
