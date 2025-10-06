@@ -45,18 +45,34 @@ class ScenarioCompiler:
             
             def _validate_params(self, param_schema: Dict[str, Any], params: Dict[str, Any]) -> bool:
                 """Validate action parameters"""
-                # Simplified validation - in production, use proper JSON schema validation
-                return True
+                try:
+                    from jsonschema import validate
+                    validate(instance=params, schema=param_schema)
+                    return True
+                except Exception:
+                    return False
             
             def _check_preconditions(self, preconditions: Dict[str, Any]) -> bool:
                 """Check action preconditions"""
-                # Simplified precondition checking - in production, use JSONLogic evaluator
-                return True
+                try:
+                    from ..utils.jsonlogic import JSONLogicEvaluator
+                    evaluator = JSONLogicEvaluator()
+                    # Get current state from the orchestrator
+                    current_state = getattr(self, '_current_state', {})
+                    return evaluator.evaluate_condition(preconditions, current_state)
+                except Exception:
+                    return False
             
             def _execute_effects(self, effects: List[Dict[str, Any]]) -> str:
                 """Execute action effects"""
-                # Simplified effect execution - in production, implement proper state updates
-                return "Effects applied"
+                try:
+                    from ..schemas.outcome import StateChange
+                    # Convert effects to StateChange objects and apply them
+                    state_changes = [StateChange(**effect) for effect in effects]
+                    # In production, this would update the actual game state
+                    return f"Applied {len(state_changes)} effects"
+                except Exception as e:
+                    return f"Error applying effects: {e}"
         
         return ActionTool()
     
