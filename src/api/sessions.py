@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from typing import Dict, Any, List
 import uuid
 import json
-from ..schemas import Outcome
+from src.schemas import Outcome
 
 router = APIRouter()
 
@@ -104,7 +104,7 @@ async def process_turn(session_id: str, request: SessionTurnRequest):
     
     # For now, return a mock outcome
     # In production, this would use the orchestrator
-    from ..schemas.outcome import StateChange
+    from src.schemas.outcome import StateChange
     
     outcome = Outcome(
         narrative="You take an action and the story continues...",

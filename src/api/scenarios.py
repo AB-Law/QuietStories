@@ -6,9 +6,9 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import Dict, Any, List
 import uuid
-from ..engine.generator import ScenarioGenerator
-from ..engine.validator import ScenarioValidator
-from ..schemas import ScenarioSpec
+from src.engine.generator import ScenarioGenerator
+from src.engine.validator import ScenarioValidator
+from src.schemas import ScenarioSpec
 
 router = APIRouter()
 

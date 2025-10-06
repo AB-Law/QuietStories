@@ -4,10 +4,11 @@ Turn orchestrator - manages turn-based gameplay
 
 from typing import Dict, Any, List, Optional
 from langchain.schema import BaseMessage, SystemMessage, HumanMessage
-from ..providers import create_provider
-from ..schemas import Outcome, ScenarioSpec
-from .compiler import ScenarioCompiler
-from .memory import MemoryManager
+from src.providers import create_provider
+from src.schemas import Outcome, ScenarioSpec
+from src.engine.compiler import ScenarioCompiler
+from src.engine.memory import MemoryManager
+from src.utils.jsonlogic import JSONLogicEvaluator
 
 
 class TurnOrchestrator:
@@ -185,7 +186,6 @@ Turn: {context['turn']}
         
         for change in state_changes:
             try:
-                from ..utils.jsonlogic import JSONLogicEvaluator
                 evaluator = JSONLogicEvaluator()
                 
                 op = change.get("op")
