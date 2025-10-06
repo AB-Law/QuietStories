@@ -34,11 +34,11 @@ class GenericProvider(BaseProvider):
         
         try:
             # Configure LLM with parameters
-            llm = self.llm.copy()
+            llm = self.llm
             if "temperature" in kwargs:
-                llm.temperature = kwargs["temperature"]
+                llm = llm.bind(temperature=kwargs["temperature"])
             if "max_tokens" in kwargs:
-                llm.max_tokens = kwargs["max_tokens"]
+                llm = llm.bind(max_tokens=kwargs["max_tokens"])
             
             # Handle tools if provided
             if tools:
@@ -89,9 +89,9 @@ class GenericProvider(BaseProvider):
         """Check if the generic endpoint is accessible"""
         try:
             # Simple health check by trying to invoke the model
-            test_message = [{"role": "user", "content": "Hello"}]
-            messages = self._convert_messages(test_message)
-            await self.llm.ainvoke(messages)
+            from langchain.schema import HumanMessage
+            test_message = HumanMessage(content="Hello")
+            await self.llm.ainvoke([test_message])
             return True
         except Exception:
             return False

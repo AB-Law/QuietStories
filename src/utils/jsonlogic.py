@@ -35,8 +35,24 @@ class JSONLogicEvaluator:
         """Validate that an expression is well-formed JSONLogic"""
         
         try:
-            # Try to evaluate with empty context
-            self.evaluator.apply(expression, {})
+            # Check if expression has valid JSONLogic structure
+            if not isinstance(expression, dict):
+                return False
+            
+            # Check for valid operators
+            valid_operators = {
+                '==', '!=', '<', '>', '<=', '>=', 'and', 'or', 'not', 
+                'in', 'cat', '+', '-', '*', '/', '%', 'if', 'var'
+            }
+            
+            # Check if any key is a valid operator
+            has_valid_operator = any(key in valid_operators for key in expression.keys())
+            if not has_valid_operator:
+                return False
+            
+            # Try to evaluate with a test context
+            test_context = {"test": True, "value": 1}
+            self.evaluator.apply(expression, test_context)
             return True
         except Exception:
             return False

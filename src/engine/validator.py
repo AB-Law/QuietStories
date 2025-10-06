@@ -67,8 +67,8 @@ class ScenarioValidator:
         success_turns = []
         
         for simulation in range(self.monte_carlo_turns):
-            # Create a copy of the spec for this simulation
-            sim_spec = spec.copy()
+            # Create a deep copy of the spec for this simulation
+            sim_spec = spec.copy(deep=True)
             sim_spec.seed = random.randint(1, 1000000)
             
             # Simulate the scenario
@@ -135,14 +135,11 @@ class ScenarioValidator:
     
     def _evaluate_condition(self, condition: Dict[str, Any], state: Dict[str, Any]) -> bool:
         """Evaluate a JSONLogic condition against the current state"""
-        # This is a simplified implementation
-        # In practice, you'd use a proper JSONLogic evaluator
         try:
-            # For now, just check if the condition is always true/false
-            if condition.get("==", [None, None])[0] == "always_true":
-                return True
-            return False
-        except:
+            from ..utils.jsonlogic import JSONLogicEvaluator
+            evaluator = JSONLogicEvaluator()
+            return evaluator.evaluate_condition(condition, state)
+        except Exception:
             return False
     
     def _get_available_actions(self, actions: List, state: Dict[str, Any]) -> List:

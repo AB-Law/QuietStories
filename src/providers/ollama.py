@@ -33,11 +33,11 @@ class OllamaProvider(BaseProvider):
         
         try:
             # Configure LLM with parameters
-            llm = self.llm.copy()
+            llm = self.llm
             if "temperature" in kwargs:
-                llm.temperature = kwargs["temperature"]
+                llm = llm.bind(temperature=kwargs["temperature"])
             if "max_tokens" in kwargs:
-                llm.num_predict = kwargs["max_tokens"]
+                llm = llm.bind(num_predict=kwargs["max_tokens"])
             
             # Convert messages to prompt format
             prompt = self._format_messages(messages)

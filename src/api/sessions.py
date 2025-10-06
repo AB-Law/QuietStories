@@ -104,14 +104,16 @@ async def process_turn(session_id: str, request: SessionTurnRequest):
     
     # For now, return a mock outcome
     # In production, this would use the orchestrator
+    from ..schemas.outcome import StateChange
+    
     outcome = Outcome(
         narrative="You take an action and the story continues...",
         state_changes=[
-            {
-                "op": "set",
-                "path": "state.turn",
-                "value": session['turn'] + 1
-            }
+            StateChange(
+                op="set",
+                path="state.turn",
+                value=session['turn'] + 1
+            )
         ]
     )
     

@@ -150,11 +150,30 @@ Turn: {context['turn']}
         """Parse and validate outcome from LLM response"""
         
         import json
+        import re
         
         try:
+            # Try to parse JSON directly
             outcome_data = json.loads(content)
             return Outcome(**outcome_data)
+        except json.JSONDecodeError as e:
+            print(f"JSON parsing error: {e}")
+            # Try to extract JSON from response
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                try:
+                    json_str = json_match.group()
+                    outcome_data = json.loads(json_str)
+                    return Outcome(**outcome_data)
+                except Exception as e2:
+                    print(f"JSON extraction failed: {e2}")
+            # Fallback to minimal outcome
+            return Outcome(
+                narrative="The story continues...",
+                state_changes=[]
+            )
         except Exception as e:
+            print(f"Outcome parsing error: {e}")
             # Fallback to minimal outcome
             return Outcome(
                 narrative="The story continues...",
@@ -165,14 +184,100 @@ Turn: {context['turn']}
         """Apply state changes to the scenario state"""
         
         for change in state_changes:
-            # Simplified state update - in production, implement proper JSON pointer resolution
-            if change["op"] == "set":
-                # Set value at path
-                pass
-            elif change["op"] == "inc":
-                # Increment value at path
-                pass
-            # ... other operations
+            try:
+                from ..utils.jsonlogic import JSONLogicEvaluator
+                evaluator = JSONLogicEvaluator()
+                
+                op = change.get("op")
+                path = change.get("path", "")
+                value = change.get("value")
+                
+                if op == "set":
+                    self._set_value_at_path(path, value)
+                elif op == "inc":
+                    current_value = self._get_value_at_path(path)
+                    self._set_value_at_path(path, current_value + value)
+                elif op == "dec":
+                    current_value = self._get_value_at_path(path)
+                    self._set_value_at_path(path, current_value - value)
+                elif op == "mul":
+                    current_value = self._get_value_at_path(path)
+                    self._set_value_at_path(path, current_value * value)
+                elif op == "patch":
+                    current_value = self._get_value_at_path(path)
+                    if isinstance(current_value, dict) and isinstance(value, dict):
+                        current_value.update(value)
+                        self._set_value_at_path(path, current_value)
+                elif op == "push":
+                    current_value = self._get_value_at_path(path)
+                    if isinstance(current_value, list):
+                        current_value.append(value)
+                        self._set_value_at_path(path, current_value)
+                elif op == "pop":
+                    current_value = self._get_value_at_path(path)
+                    if isinstance(current_value, list) and len(current_value) > 0:
+                        current_value.pop()
+                        self._set_value_at_path(path, current_value)
+                elif op == "addlog":
+                    # Add to log list
+                    log_path = path if path else "state.log"
+                    current_log = self._get_value_at_path(log_path)
+                    if isinstance(current_log, list):
+                        current_log.append(value)
+                        self._set_value_at_path(log_path, current_log)
+                    else:
+                        self._set_value_at_path(log_path, [value])
+                        
+            except Exception as e:
+                # Log error but continue with other changes
+                print(f"Error applying state change {change}: {e}")
+    
+    def _get_value_at_path(self, path: str) -> Any:
+        """Get value at JSON pointer path"""
+        if not path or path == "":
+            return self.spec.state
+        
+        # Simple path resolution - in production, use proper JSON pointer library
+        parts = path.split(".")
+        current = self.spec.state
+        
+        for part in parts:
+            if part.startswith("[") and part.endswith("]"):
+                # Array access
+                index = int(part[1:-1])
+                current = current[index]
+            else:
+                current = current.get(part, {})
+        
+        return current
+    
+    def _set_value_at_path(self, path: str, value: Any):
+        """Set value at JSON pointer path"""
+        if not path or path == "":
+            self.spec.state = value
+            return
+        
+        # Simple path resolution - in production, use proper JSON pointer library
+        parts = path.split(".")
+        current = self.spec.state
+        
+        for i, part in enumerate(parts[:-1]):
+            if part.startswith("[") and part.endswith("]"):
+                # Array access
+                index = int(part[1:-1])
+                current = current[index]
+            else:
+                if part not in current:
+                    current[part] = {}
+                current = current[part]
+        
+        # Set the final value
+        final_part = parts[-1]
+        if final_part.startswith("[") and final_part.endswith("]"):
+            index = int(final_part[1:-1])
+            current[index] = value
+        else:
+            current[final_part] = value
     
     def _update_memory(self, memory_updates: List[Dict[str, Any]]):
         """Update memory with hidden updates"""
