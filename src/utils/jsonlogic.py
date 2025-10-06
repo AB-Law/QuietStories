@@ -1,0 +1,42 @@
+"""
+JSONLogic evaluator for conditions and derived values
+"""
+
+from typing import Any, Dict
+import jsonlogic
+
+
+class JSONLogicEvaluator:
+    """Evaluates JSONLogic expressions against state"""
+    
+    def __init__(self):
+        self.evaluator = jsonlogic
+    
+    def evaluate(self, expression: Dict[str, Any], context: Dict[str, Any]) -> Any:
+        """Evaluate a JSONLogic expression against context"""
+        
+        try:
+            return self.evaluator.apply(expression, context)
+        except Exception as e:
+            raise ValueError(f"JSONLogic evaluation failed: {e}")
+    
+    def evaluate_condition(self, condition: Dict[str, Any], state: Dict[str, Any]) -> bool:
+        """Evaluate a condition and return boolean result"""
+        
+        result = self.evaluate(condition, state)
+        return bool(result)
+    
+    def evaluate_derived(self, derived_expr: Dict[str, Any], state: Dict[str, Any]) -> Any:
+        """Evaluate a derived value expression"""
+        
+        return self.evaluate(derived_expr, state)
+    
+    def validate_expression(self, expression: Dict[str, Any]) -> bool:
+        """Validate that an expression is well-formed JSONLogic"""
+        
+        try:
+            # Try to evaluate with empty context
+            self.evaluator.apply(expression, {})
+            return True
+        except Exception:
+            return False
