@@ -4,8 +4,9 @@ Generic HTTP provider for OpenAI-compatible endpoints using LangChain
 
 from typing import Any, Dict, List, Optional, Union
 import json
+import logging
 from langchain_openai import ChatOpenAI
-from langchain.schema import BaseMessage
+from langchain.schema import BaseMessage, HumanMessage
 from langchain.tools import BaseTool
 from .base import BaseProvider, ProviderResponse
 
@@ -34,7 +35,6 @@ class GenericProvider(BaseProvider):
         """Send chat request to generic OpenAI-compatible endpoint using LangChain"""
         
         try:
-            import logging
             logger = logging.getLogger(__name__)
             # Configure LLM with parameters
             llm = self.llm
@@ -112,7 +112,6 @@ class GenericProvider(BaseProvider):
         """Check if the generic endpoint is accessible"""
         try:
             # Simple health check by trying to invoke the model
-            from langchain.schema import HumanMessage
             test_message = HumanMessage(content="Hello")
             await self.llm.ainvoke([test_message])
             return True

@@ -9,6 +9,11 @@ import os
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
+from config import settings
+from schemas import ScenarioSpec, Outcome
+from providers import create_provider
+from engine import ScenarioGenerator, ScenarioValidator
+
 def test_imports():
     """Test that all modules can be imported"""
     
@@ -16,7 +21,6 @@ def test_imports():
     
     try:
         # Test config
-        from config import settings
         print(f"✓ Config loaded: Provider = {settings.model_provider}")
     except Exception as e:
         print(f"✗ Config failed: {e}")
@@ -24,7 +28,6 @@ def test_imports():
     
     try:
         # Test schemas
-        from schemas import ScenarioSpec, Outcome
         print("✓ Schemas imported")
     except Exception as e:
         print(f"✗ Schemas failed: {e}")
@@ -32,7 +35,6 @@ def test_imports():
     
     try:
         # Test providers
-        from providers import create_provider
         print("✓ Providers imported")
     except Exception as e:
         print(f"✗ Providers failed: {e}")
@@ -40,7 +42,6 @@ def test_imports():
     
     try:
         # Test engine
-        from engine import ScenarioGenerator, ScenarioValidator
         print("✓ Engine imported")
     except Exception as e:
         print(f"✗ Engine failed: {e}")
@@ -54,7 +55,6 @@ def test_schema_validation():
     print("\nTesting schema validation...")
     
     try:
-        from schemas import ScenarioSpec, Outcome
         
         # Test valid scenario spec
         valid_spec = {
