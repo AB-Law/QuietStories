@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import { Button } from './ui/Button';
-import { Input } from './ui/Input';
 import { apiService } from '../services/api';
 import type { Session, TurnResponse } from '../services/api';
 import { Send, Loader2, Plus, Sparkles } from 'lucide-react';
@@ -30,7 +29,7 @@ export function Chat() {
   const [generateWorld, setGenerateWorld] = useState(true);
   const [generateEntityBackgrounds, setGenerateEntityBackgrounds] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -224,6 +223,12 @@ export function Chat() {
       // Refresh full session data to get updated entities and turn history
       try {
         const updatedSession = await apiService.getSession(currentSession.id);
+        console.log('Updated session entities:', updatedSession.entities?.length, 'entities');
+        if (updatedSession.entities) {
+          updatedSession.entities.forEach((e: any) => {
+            console.log(`  - ${e.id || e.name}: background=${e.background ? 'YES' : 'NO'}`);
+          });
+        }
         setCurrentSession(updatedSession);
       } catch (error) {
         console.error('Failed to refresh session data:', error);
@@ -452,13 +457,21 @@ export function Chat() {
         {currentSession && (
           <div className="border-t p-4">
             <div className="flex gap-2">
-              <Input
+              <textarea
                 ref={inputRef}
                 placeholder="Type your action..."
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyPress={handleKeyPress}
                 disabled={isLoading}
+                className="flex-1 min-h-[40px] max-h-[120px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none overflow-y-auto"
+                rows={1}
+                style={{ height: 'auto' }}
+                onInput={(e) => {
+                  const target = e.target as HTMLTextAreaElement;
+                  target.style.height = 'auto';
+                  target.style.height = Math.min(target.scrollHeight, 120) + 'px';
+                }}
               />
               <Button onClick={sendMessage} disabled={isLoading || !inputValue.trim()}>
                 {isLoading ? (

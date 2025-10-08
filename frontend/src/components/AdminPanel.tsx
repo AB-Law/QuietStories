@@ -51,7 +51,9 @@ export function AdminPanel() {
       // Fetch actual memories from backend
       try {
         const memoriesData = await apiService.getSessionMemories(sessionId);
+        console.log('Raw memories data from API:', memoriesData);
         const convertedMemories = convertMemoriesToDisplay(memoriesData);
+        console.log('Converted memories for display:', convertedMemories);
         setMemories(convertedMemories);
       } catch (error) {
         console.error('Failed to load memories:', error);

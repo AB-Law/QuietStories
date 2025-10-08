@@ -159,6 +159,8 @@ async def create_session(request: SessionCreateRequest):
         "turn_history": [],
         "world_background": world_background,
         "entities": detailed_entities,
+        "private_memory": {},
+        "public_memory": {},
         "status": "active",
         "scenario_spec": spec_dict
     }
@@ -169,7 +171,7 @@ async def create_session(request: SessionCreateRequest):
     
     # Create orchestrator for this session
     logger.debug("Creating TurnOrchestrator...")
-    orchestrator = TurnOrchestrator(spec, session_id)
+    orchestrator = TurnOrchestrator(spec, session_id, db)
     orchestrator.set_session_ref(session_data)  # Set reference for accessing turn history
     orchestrators_db[session_id] = orchestrator
     
@@ -258,7 +260,9 @@ async def process_turn(session_id: str, request: SessionTurnRequest):
         if session_id not in orchestrators_db:
             logger.warning("Orchestrator not found in cache, recreating from session data...")
             spec = ScenarioSpec(**session["scenario_spec"])
-            orchestrator = TurnOrchestrator(spec, session_id)
+            # Update spec entities with the detailed entities from session
+            spec.entities = session.get('entities', spec.entities)
+            orchestrator = TurnOrchestrator(spec, session_id, db)
             orchestrator.set_session_ref(session)  # Set reference for turn history access
             orchestrators_db[session_id] = orchestrator
             logger.info("✓ Orchestrator recreated")
@@ -307,15 +311,24 @@ async def process_turn(session_id: str, request: SessionTurnRequest):
         turn_history = session.get('turn_history', [])
         turn_history.append(turn_record)
         
-        # Update entities if they changed
+        # Get entities from orchestrator - ALWAYS update to ensure backgrounds persist
         entities = orchestrator.spec.entities
+        logger.debug(f"Entities after turn: {len(entities)} entities")
+        for entity in entities[:3]:  # Log first 3
+            logger.debug(f"  - {entity.get('id')}: has background={bool(entity.get('background'))}")
         
-        # Update in database
+        # Get memories from orchestrator
+        private_memory = dict(orchestrator.memory.private_memory)
+        public_memory = dict(orchestrator.memory.public_memory)
+        
+        # Update in database - ALWAYS include entities to preserve backgrounds
         db.update_session(session_id, {
             'turn': new_turn,
             'state': state_after,
             'turn_history': turn_history,
-            'entities': entities
+            'entities': entities,  # Always save entities to keep backgrounds
+            'private_memory': private_memory,
+            'public_memory': public_memory
         })
         
         # Update session reference for orchestrator
@@ -441,7 +454,7 @@ async def get_session_memories(session_id: str):
     if session_id not in orchestrators_db:
         logger.debug("Recreating orchestrator to access memories...")
         spec = ScenarioSpec(**session["scenario_spec"])
-        orchestrator = TurnOrchestrator(spec, session_id)
+        orchestrator = TurnOrchestrator(spec, session_id, db)
         orchestrator.set_session_ref(session)
         orchestrators_db[session_id] = orchestrator
     else:
@@ -452,6 +465,8 @@ async def get_session_memories(session_id: str):
     public_memory = dict(orchestrator.memory.public_memory)
     
     logger.debug(f"Retrieved memories: {len(private_memory)} private, {len(public_memory)} public")
+    logger.debug(f"Private memory keys: {list(private_memory.keys())}")
+    logger.debug(f"Public memory keys: {list(public_memory.keys())}")
     
     return {
         "private_memory": private_memory,
