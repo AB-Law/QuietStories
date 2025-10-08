@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { MessageSquare, Shield, Moon, Sun } from 'lucide-react';
 import { Button } from './ui/Button';

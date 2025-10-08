@@ -199,9 +199,21 @@ Generate a compelling 2-4 paragraph world background:"""
         
         detailed_entities = []
         
-        # Generate in batch for efficiency (limited by max_entities)
-        batch_size = min(len(entities), max_entities)
-        entities_to_process = entities[:batch_size]
+        # If we need more entities than provided, generate placeholder entities
+        entities_to_process = entities[:]
+        if max_entities > len(entities):
+            logger.debug(f"Generating {max_entities - len(entities)} additional placeholder entities")
+            for i in range(len(entities), max_entities):
+                placeholder_entity = {
+                    "id": f"character_{i+1}",
+                    "type": "character",
+                    "name": f"Character {i+1}"
+                }
+                entities_to_process.append(placeholder_entity)
+        
+        # Generate backgrounds for all entities up to max_entities
+        batch_size = min(len(entities_to_process), max_entities)
+        entities_to_process = entities_to_process[:batch_size]
         
         logger.debug(f"Processing {len(entities_to_process)} entities (limit: {max_entities})")
         
@@ -222,11 +234,6 @@ Generate a compelling 2-4 paragraph world background:"""
                 logger.warning(f"Failed to generate background for entity {entity.get('id')}: {e}")
                 # Keep entity without background
                 detailed_entities.append(entity)
-        
-        # Add remaining entities without backgrounds
-        if len(entities) > batch_size:
-            logger.debug(f"Adding {len(entities) - batch_size} remaining entities without backgrounds")
-            detailed_entities.extend(entities[batch_size:])
         
         return detailed_entities
     
