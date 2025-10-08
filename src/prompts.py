@@ -152,7 +152,7 @@ NARRATIVE REQUIREMENTS:
 - World building details and atmosphere
 - Character interactions when present
 - Hint at available actions naturally in the story
-- Record NPC thoughts and important observations using hidden_memory_updates
+- Record NPC thoughts and important observations using the add_memory tool during the thinking phase
 
 The player's POV entity and current context will be provided.
 You can see public information about all entities, but only private information for the POV entity.
