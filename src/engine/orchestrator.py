@@ -10,7 +10,8 @@ This module coordinates the game loop, managing:
 
 from typing import Dict, Any, List, Optional
 import json
-from langchain.schema import BaseMessage, SystemMessage, HumanMessage
+from langchain.schema import BaseMessage, SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import ToolMessage
 from src.providers import create_provider
 from src.schemas import Outcome, ScenarioSpec
 from src.engine.compiler import ScenarioCompiler
@@ -18,6 +19,7 @@ from src.engine.memory import MemoryManager
 from src.utils.jsonlogic import JSONLogicEvaluator
 from src.prompts import NARRATOR_SYSTEM, NARRATOR_USER
 from src.utils.logger import get_logger
+from src.db.manager import DatabaseManager
 
 logger = get_logger(__name__)
 
@@ -40,19 +42,34 @@ class TurnOrchestrator:
         _session_ref: Reference to fetch turn history
     """
     
-    def __init__(self, spec: ScenarioSpec, session_id: str):
+    def __init__(self, spec: ScenarioSpec, session_id: str, db_manager=None):
         """
         Initialize the turn orchestrator.
         
         Args:
             spec: Scenario specification defining game rules
             session_id: Unique session identifier
+            db_manager: Database manager for persistence (optional)
         """
         self.spec = spec
         self.session_id = session_id
+        self.db_manager = db_manager
         self.provider = create_provider()
         self.compiler = ScenarioCompiler(spec)
-        self.memory = MemoryManager(session_id)
+        self.compiler._orchestrator = self  # Give compiler access to orchestrator
+        
+        # Load memory from database if available
+        private_memory = {}
+        public_memory = {}
+        turn_count = 0
+        if db_manager:
+            session_data = db_manager.get_session(session_id)
+            if session_data:
+                private_memory = session_data.get('private_memory', {})
+                public_memory = session_data.get('public_memory', {})
+                turn_count = session_data.get('turn', 0)
+        
+        self.memory = MemoryManager(session_id, db_manager, private_memory, public_memory, turn_count)
         self.tools = self.compiler.get_tools()
         self._session_ref = None  # Will be set to access session data
     
@@ -67,14 +84,12 @@ class TurnOrchestrator:
     
     async def process_turn(self, user_input: str = None) -> Outcome:
         """
-        Process a single turn of gameplay.
+        Process a single turn of gameplay with multi-turn tool calling.
         
-        This method:
-        1. Builds context from state, history, and memory
-        2. Generates narrative via LLM
-        3. Applies state changes
-        4. Updates memory
-        5. Increments turn counter
+        This method implements an agentic loop where the LLM can:
+        1. Call tools to read/update state, create characters, etc.
+        2. Receive tool results and continue reasoning
+        3. Finally provide the narrative outcome
         
         Args:
             user_input: Optional player action description
@@ -85,32 +100,145 @@ class TurnOrchestrator:
         Raises:
             Exception: If LLM call fails and fallback also fails
         """
-        logger.info(f"[Orchestrator] Processing turn {self.memory.get_turn_count() + 1}")
+        logger.info(f"[Orchestrator] Processing turn {self.memory.get_turn_count() + 1} with agentic tool calling")
         
         # Build context for the LLM
         context = self._build_context()
         
-        # Create messages
+        # Create initial messages
         messages = [
             SystemMessage(content=self._get_system_prompt()),
             HumanMessage(content=self._get_user_prompt(context, user_input))
         ]
         
-        logger.debug("[Orchestrator] Calling provider.chat with outcome schema")
+        max_rounds = 5  # Prevent infinite loops
+        round_num = 0
         
-        # Get response from LLM - don't pass scenario actions as tools
-        # The narrator should use state_changes in the Outcome JSON instead
-        response = await self.provider.chat(
+        logger.info(f"[Orchestrator] 🎯 Starting agentic tool calling loop (max {max_rounds} rounds)")
+        logger.info(f"[Orchestrator] 🔨 Available tools: {[t.name for t in self.tools]}")
+        
+        while round_num < max_rounds:
+            round_num += 1
+            logger.info(f"[Orchestrator] 🔄 === Round {round_num}/{max_rounds} ===")
+            
+            # Call LLM with current messages and tools
+            response = await self.provider.chat(
+                messages=messages,
+                tools=self.tools
+            )
+            
+            logger.debug(f"[Orchestrator] Response content preview: {(response.content or '')[:100]}...")
+            logger.debug(f"[Orchestrator] Has tool calls: {bool(response.tool_calls)}")
+            
+            # Add assistant message to conversation
+            # Format tool_calls for LangChain AIMessage
+            formatted_tool_calls = []
+            if response.tool_calls:
+                import json
+                for tc in response.tool_calls:
+                    raw_args = tc.get("function", {}).get("arguments", {})
+                    # Parse args if they're a string
+                    if isinstance(raw_args, str):
+                        try:
+                            parsed_args = json.loads(raw_args) if raw_args else {}
+                        except json.JSONDecodeError:
+                            parsed_args = {}
+                    else:
+                        parsed_args = raw_args
+                    
+                    formatted_tool_calls.append({
+                        "name": tc.get("function", {}).get("name"),
+                        "args": parsed_args,
+                        "id": tc.get("id"),
+                        "type": tc.get("type", "function")
+                    })
+            
+            # Create AIMessage - only include tool_calls if they exist
+            if formatted_tool_calls:
+                assistant_message = AIMessage(
+                    content=response.content or "",
+                    tool_calls=formatted_tool_calls
+                )
+            else:
+                assistant_message = AIMessage(
+                    content=response.content or ""
+                )
+            messages.append(assistant_message)
+            
+            # Check if LLM wants to call tools
+            if response.tool_calls:
+                logger.info(f"[Orchestrator] 🔧 LLM called {len(response.tool_calls)} tools in round {round_num}")
+                
+                # Execute each tool call
+                for idx, tool_call in enumerate(response.tool_calls, 1):
+                    tool_name = tool_call.get("function", {}).get("name")
+                    tool_args = tool_call.get("function", {}).get("arguments", {})
+                    tool_call_id = tool_call.get("id")
+                    
+                    logger.info(f"[Orchestrator] 🔧 Tool {idx}/{len(response.tool_calls)}: {tool_name}")
+                    logger.info(f"[Orchestrator]    Raw args: {tool_args}")
+                    
+                    try:
+                        # Parse tool arguments if they're a JSON string
+                        if isinstance(tool_args, str):
+                            import json
+                            try:
+                                args = json.loads(tool_args) if tool_args else {}
+                            except json.JSONDecodeError:
+                                logger.error(f"[Orchestrator] ✗ Failed to parse tool args as JSON: {tool_args}")
+                                args = {}
+                        elif isinstance(tool_args, dict):
+                            args = tool_args
+                        else:
+                            logger.warning(f"[Orchestrator] ⚠ Unexpected tool_args type: {type(tool_args)}")
+                            args = {}
+                        
+                        logger.info(f"[Orchestrator]    Parsed args: {args}")
+                        
+                        # Find and execute the tool
+                        tool_result = await self._execute_tool(tool_name, args)
+                        
+                        # Add tool result to messages
+                        tool_message = ToolMessage(
+                            content=str(tool_result),
+                            tool_call_id=tool_call_id
+                        )
+                        messages.append(tool_message)
+                        
+                        logger.info(f"[Orchestrator] ✓ Tool {tool_name} result: {tool_result}")
+                        
+                    except Exception as e:
+                        logger.error(f"[Orchestrator] ✗ Tool {tool_name} execution failed: {e}")
+                        # Add error result to messages
+                        tool_message = ToolMessage(
+                            content=f"Error executing tool {tool_name}: {e}",
+                            tool_call_id=tool_call_id
+                        )
+                        messages.append(tool_message)
+                
+                # Continue to next round since tools were called
+                logger.info(f"[Orchestrator] 🔄 Continuing to next round with tool results...")
+                continue
+            else:
+                # LLM is done with tools, break to get final narrative
+                logger.info(f"[Orchestrator] ✅ LLM finished tool calls after {round_num} rounds")
+                break
+        
+        # Check if we hit max rounds
+        if round_num >= max_rounds:
+            logger.warning(f"[Orchestrator] ⚠ Hit maximum rounds ({max_rounds}), forcing final narrative")
+        
+        # Now get the final narrative with structured output
+        logger.info("[Orchestrator] 📖 Requesting final structured narrative outcome from LLM")
+        messages.append(HumanMessage(content="Now provide the final narrative outcome as structured JSON with the Outcome schema."))
+        
+        final_response = await self.provider.chat(
             messages=messages,
             json_schema=self._get_outcome_schema()
         )
-        logger.info("[Orchestrator] Provider returned; parsing outcome")
         
-        # Check for empty content
-        if not response.content or response.content.strip() == '':
-            logger.error("[Orchestrator] Empty content from provider!")
-            if response.tool_calls:
-                logger.error(f"[Orchestrator] Provider tried to call tools: {[tc.get('function', {}).get('name') for tc in response.tool_calls]}")
+        if not final_response.content or final_response.content.strip() == '':
+            logger.error("[Orchestrator] ✗ Empty final content from provider!")
             # Fallback to minimal outcome
             outcome = Outcome(
                 narrative="The story continues...",
@@ -118,19 +246,35 @@ class TurnOrchestrator:
             )
         else:
             # Parse and validate outcome
-            logger.debug(f"[Orchestrator] Content preview: {response.content[:300]}")
-            outcome = self._parse_outcome(response.content)
+            logger.debug(f"[Orchestrator] Final content preview: {final_response.content[:300]}")
+            outcome = self._parse_outcome(final_response.content)
+        
+        # Log outcome summary
+        logger.info(f"[Orchestrator] 📖 Narrative length: {len(outcome.narrative)} chars")
+        logger.info(f"[Orchestrator] 🔄 State changes: {len(outcome.state_changes)}")
+        if outcome.hidden_memory_updates:
+            logger.info(f"[Orchestrator] 🧠 Memory updates: {len(outcome.hidden_memory_updates)}")
         
         # Apply state changes
+        if outcome.state_changes:
+            logger.info(f"[Orchestrator] Applying {len(outcome.state_changes)} state changes...")
+            for i, change in enumerate(outcome.state_changes, 1):
+                logger.debug(f"[Orchestrator]   {i}. {change.op} {change.path} = {str(change.value)[:50]}")
         self._apply_state_changes(outcome.state_changes)
         
-        # Update memory
+        # Update memory - but skip if LLM already used add_memory tool
+        # (to avoid duplicates from both tool calls and hidden_memory_updates)
         if outcome.hidden_memory_updates:
-            self._update_memory(outcome.hidden_memory_updates)
+            logger.info(f"[Orchestrator] 🧠 Skipping hidden_memory_updates (memories already saved via tools)")
+            logger.debug(f"[Orchestrator] Note: LLM should use add_memory tool during thinking, not hidden_memory_updates in outcome")
+            # self._update_memory(outcome.hidden_memory_updates)  # Disabled to prevent duplicates
         
         # Increment turn counter
         self.memory.increment_turn()
-        logger.debug(f"[Orchestrator] Turn incremented to {self.memory.get_turn_count()}")
+        logger.info(f"[Orchestrator] ✅ Turn completed: {self.memory.get_turn_count()}")
+        
+        # Save memory to database
+        self.memory.save_to_database()
         
         return outcome
     
@@ -534,12 +678,12 @@ Summary:"""
         else:
             current[final_part] = value
     
-    def _update_memory(self, memory_updates: List[Dict[str, Any]]):
+    def _update_memory(self, memory_updates: List[Any]):
         """
         Update entity memories from hidden memory updates.
         
         Args:
-            memory_updates: List of memory update dictionaries from Outcome
+            memory_updates: List of memory update objects or dicts from Outcome
         
         Note:
             Processes hidden_memory_updates from the narrator's Outcome,
@@ -547,10 +691,19 @@ Summary:"""
             Each update should have: target_id, content, scope, visibility.
         """
         for update in memory_updates:
-            target_id = update.get("target_id")
-            content = update.get("content")
-            scope = update.get("scope", "general")
-            visibility = update.get("visibility", "private")
+            # Handle both Pydantic objects and dicts
+            if hasattr(update, 'target_id'):
+                # Pydantic object
+                target_id = update.target_id
+                content = update.content
+                scope = getattr(update, 'scope', 'general')
+                visibility = getattr(update, 'visibility', 'private')
+            else:
+                # Dict
+                target_id = update.get("target_id")
+                content = update.get("content")
+                scope = update.get("scope", "general")
+                visibility = update.get("visibility", "private")
             
             if not target_id or not content:
                 logger.warning(f"Skipping invalid memory update: {update}")
@@ -626,3 +779,38 @@ Summary:"""
         # return available
         
         return action_ids
+    
+    async def _execute_tool(self, tool_name: str, args: Dict[str, Any]) -> str:
+        """
+        Execute a tool by name with given arguments.
+        
+        Args:
+            tool_name: Name of the tool to execute
+            args: Arguments to pass to the tool
+        
+        Returns:
+            String result of tool execution
+        
+        Raises:
+            ValueError: If tool name is not recognized
+        """
+        logger.debug(f"[Orchestrator] Executing tool {tool_name} with args: {args}")
+        
+        # Find the tool by name
+        tool = None
+        for t in self.tools:
+            if t.name == tool_name:
+                tool = t
+                break
+        
+        if not tool:
+            raise ValueError(f"Unknown tool: {tool_name}")
+        
+        try:
+            # Execute the tool directly by calling _arun with unpacked arguments
+            result = await tool._arun(**args)
+            logger.debug(f"[Orchestrator] Tool {tool_name} returned: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"[Orchestrator] Tool {tool_name} execution error: {e}")
+            raise
