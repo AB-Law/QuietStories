@@ -3,6 +3,7 @@ Generic HTTP provider for OpenAI-compatible endpoints using LangChain
 """
 
 from typing import Any, Dict, List, Optional, Union
+import json
 from langchain_openai import ChatOpenAI
 from langchain.schema import BaseMessage
 from langchain.tools import BaseTool
@@ -33,29 +34,51 @@ class GenericProvider(BaseProvider):
         """Send chat request to generic OpenAI-compatible endpoint using LangChain"""
         
         try:
+            import logging
+            logger = logging.getLogger(__name__)
             # Configure LLM with parameters
             llm = self.llm
             if "temperature" in kwargs:
                 llm = llm.bind(temperature=kwargs["temperature"])
             if "max_tokens" in kwargs:
                 llm = llm.bind(max_tokens=kwargs["max_tokens"])
-            
-            # Handle tools if provided
+
+            # Bind tools first if any (LangChain guidance)
             if tools:
-                # Use LangChain's tool calling
-                llm_with_tools = llm.bind_tools(tools)
-                response = await llm_with_tools.ainvoke(messages)
-            else:
-                response = await llm.ainvoke(messages)
-            
+                llm = llm.bind_tools(tools)
+
+            # If a json_schema was provided, enforce structured output
+            if json_schema is not None:
+                # with_structured_output can take a dict JSON schema
+                structured_llm = llm.with_structured_output(json_schema)
+                logger.info("[Provider] with_structured_output → invoking model")
+                logger.info(f"[Provider] Messages: {messages}")
+                structured = await structured_llm.ainvoke(messages)
+                logger.info(f"[Provider] Structured result type: {type(structured)}")
+                # Ensure we return content as a JSON string so downstream parsers work
+                content = json.dumps(structured)
+                return ProviderResponse(
+                    content=content,
+                    usage=getattr(structured, 'usage_metadata', None),
+                    model=self.model_name,
+                    tool_calls=None,
+                )
+
+            # Otherwise normal invocation
+            logger.info("[Provider] Normal ainvoke without structured output")
+            logger.info(f"[Provider] Messages: {messages}")
+            response = await llm.ainvoke(messages)
+            logger.info(f"[Provider] Response class: {type(response)}")
+
             # Handle streaming
             if stream:
                 return self._handle_streaming_response(llm, messages, tools, **kwargs)
-            
+
             # Extract content and tool calls
             content = response.content if hasattr(response, 'content') else str(response)
+            logger.info(f"[Provider] Content preview: {content[:300]}")
             tool_calls = None
-            
+
             if hasattr(response, 'tool_calls') and response.tool_calls:
                 tool_calls = [
                     {
@@ -68,7 +91,7 @@ class GenericProvider(BaseProvider):
                     }
                     for tc in response.tool_calls
                 ]
-            
+
             return ProviderResponse(
                 content=content,
                 usage=getattr(response, 'usage_metadata', None),

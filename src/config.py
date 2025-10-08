@@ -32,6 +32,13 @@ class Settings(BaseSettings):
         default=0.25, env="NEGATIVITY_MIN_FAIL_RATE"
     )
     
+    # Database Configuration
+    database_path: str = Field(
+        default="data/quietstories.db",
+        env="DATABASE_PATH",
+        description="SQLite database file path for storing scenarios and sessions"
+    )
+    
     class Config:
         env_file = ".env"
         case_sensitive = False

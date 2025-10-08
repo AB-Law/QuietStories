@@ -16,6 +16,9 @@ langchain-community
 jsonschema
 jsonlogic-py
 
+# Database
+sqlalchemy
+
 # Testing
 pytest
 pytest-asyncio

@@ -47,7 +47,7 @@ class LossCondition(BaseModel):
 
 class NegativityBudget(BaseModel):
     """Negativity budget configuration"""
-    min_fail_rate: float = Field(..., ge=0.0, le=1.0, description="Minimum failure rate")
+    min_fail_rate: float = Field(..., gt=0.0, le=1.0, description="Minimum failure rate (must be > 0)")
     decay_per_turn: Dict[str, float] = Field(..., description="Decay rates per turn")
 
 
@@ -63,15 +63,3 @@ class ScenarioSpec(BaseModel):
     random_events: List[RandomEvent] = Field(..., description="Random events")
     loss_conditions: List[LossCondition] = Field(..., min_items=2, description="Loss conditions (≥2 required)")
     negativity_budget: NegativityBudget = Field(..., description="Negativity budget configuration")
-    
-    @validator('loss_conditions')
-    def validate_loss_conditions(cls, v):
-        if len(v) < 2:
-            raise ValueError("At least 2 loss conditions are required")
-        return v
-    
-    @validator('negativity_budget')
-    def validate_negativity_budget(cls, v):
-        if v.min_fail_rate <= 0:
-            raise ValueError("Negativity budget must have non-zero min_fail_rate")
-        return v
