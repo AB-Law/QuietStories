@@ -7,6 +7,7 @@ from langchain.tools import BaseTool
 from src.schemas import ScenarioSpec, Action
 from src.utils.jsonlogic import JSONLogicEvaluator
 from src.schemas.outcome import StateChange
+from jsonschema import validate
 
 
 class ScenarioCompiler:
@@ -49,7 +50,6 @@ class ScenarioCompiler:
             def _validate_params(self, param_schema: Dict[str, Any], params: Dict[str, Any]) -> bool:
                 """Validate action parameters"""
                 try:
-                    from jsonschema import validate
                     validate(instance=params, schema=param_schema)
                     return True
                 except Exception:
