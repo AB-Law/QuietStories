@@ -213,6 +213,8 @@ class DatabaseManager:
                 - turn_history: List of turn records
                 - world_background: World narrative (optional)
                 - entities: List of entities (optional)
+                - private_memory: Private entity memories (optional)
+                - public_memory: Public entity memories (optional)
                 - status: Session status (optional)
                 - scenario_spec: Cached scenario spec (optional)
         
@@ -236,6 +238,8 @@ class DatabaseManager:
                 existing.turn_history = session_dict.get('turn_history', [])
                 existing.world_background = session_dict.get('world_background')
                 existing.entities = session_dict.get('entities', [])
+                existing.private_memory = session_dict.get('private_memory', {})
+                existing.public_memory = session_dict.get('public_memory', {})
                 existing.status = session_dict.get('status', 'active')
                 existing.scenario_spec = session_dict.get('scenario_spec')
                 existing.updated_at = datetime.utcnow()
@@ -251,6 +255,8 @@ class DatabaseManager:
                     turn_history=session_dict.get('turn_history', []),
                     world_background=session_dict.get('world_background'),
                     entities=session_dict.get('entities', []),
+                    private_memory=session_dict.get('private_memory', {}),
+                    public_memory=session_dict.get('public_memory', {}),
                     status=session_dict.get('status', 'active'),
                     scenario_spec=session_dict.get('scenario_spec'),
                     created_at=datetime.utcnow()
@@ -269,6 +275,8 @@ class DatabaseManager:
                 'turn_history': session.turn_history or [],
                 'world_background': session.world_background,
                 'entities': session.entities or [],
+                'private_memory': session.private_memory or {},
+                'public_memory': session.public_memory or {},
                 'status': session.status,
                 'scenario_spec': session.scenario_spec,
                 'created_at': session.created_at.isoformat() if session.created_at else None
@@ -306,6 +314,8 @@ class DatabaseManager:
                     'turn_history': session.turn_history or [],
                     'world_background': session.world_background,
                     'entities': session.entities or [],
+                    'private_memory': session.private_memory or {},
+                    'public_memory': session.public_memory or {},
                     'status': session.status,
                     'scenario_spec': session.scenario_spec,
                     'created_at': session.created_at.isoformat() if session.created_at else None,

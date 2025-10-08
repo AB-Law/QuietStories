@@ -48,6 +48,8 @@ class Session(Base):
         turn_history: Array of turn records as JSON
         world_background: Generated world narrative
         entities: Current entity/character list as JSON
+        private_memory: Private entity memories as JSON
+        public_memory: Public entity memories as JSON
         status: Session status (active, completed, failed)
         created_at: Timestamp when session was created
         updated_at: Timestamp when session was last updated
@@ -62,6 +64,8 @@ class Session(Base):
     turn_history = Column(JSON, nullable=False, default=list)
     world_background = Column(Text, nullable=True)
     entities = Column(JSON, nullable=False, default=list)
+    private_memory = Column(JSON, nullable=False, default=dict)
+    public_memory = Column(JSON, nullable=False, default=dict)
     status = Column(String, nullable=False, default='active')
     scenario_spec = Column(JSON, nullable=True)  # Cached scenario spec
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

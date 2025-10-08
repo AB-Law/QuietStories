@@ -9,11 +9,20 @@ from collections import defaultdict
 class MemoryManager:
     """Manages private and public memory for entities"""
     
-    def __init__(self, session_id: str):
+    def __init__(self, session_id: str, db_manager=None, initial_private_memory=None, initial_public_memory=None, initial_turn_count=0):
         self.session_id = session_id
+        self.db_manager = db_manager
         self.private_memory: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         self.public_memory: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        self.turn_count = 0
+        self.turn_count = initial_turn_count
+        
+        # Load initial memory if provided
+        if initial_private_memory:
+            for entity_id, memories in initial_private_memory.items():
+                self.private_memory[entity_id] = memories
+        if initial_public_memory:
+            for entity_id, memories in initial_public_memory.items():
+                self.public_memory[entity_id] = memories
     
     def get_private_memory(self, entity_id: str) -> List[Dict[str, Any]]:
         """Get private memory for an entity"""
@@ -46,14 +55,14 @@ class MemoryManager:
         """Increment turn count"""
         self.turn_count += 1
     
-    def clear_memory(self, entity_id: str = None):
-        """Clear memory for an entity or all entities"""
-        if entity_id:
-            self.private_memory.pop(entity_id, None)
-            self.public_memory.pop(entity_id, None)
-        else:
-            self.private_memory.clear()
-            self.public_memory.clear()
+    def save_to_database(self):
+        """Save current memory state to database"""
+        if self.db_manager:
+            self.db_manager.update_session(self.session_id, {
+                'private_memory': dict(self.private_memory),
+                'public_memory': dict(self.public_memory),
+                'turn': self.turn_count
+            })
     
     def get_memory_summary(self, entity_id: str, max_turns: int = 10) -> str:
         """Get a summary of recent memory for an entity"""
