@@ -7,6 +7,7 @@ from langchain.tools import BaseTool
 from src.schemas import ScenarioSpec, Action
 from src.utils.jsonlogic import JSONLogicEvaluator
 from src.schemas.outcome import StateChange
+from jsonschema import validate
 
 
 class ScenarioCompiler:
@@ -28,8 +29,9 @@ class ScenarioCompiler:
         """Create a LangChain tool from an action"""
         
         class ActionTool(BaseTool):
-            name = action.id
-            description = f"Action: {action.id}"
+            # Pydantic v2/LC tools require annotated fields
+            name: str = action.id
+            description: str = f"Action: {action.id}"
             
             def _run(self, **kwargs) -> str:
                 """Execute the action"""
@@ -48,7 +50,6 @@ class ScenarioCompiler:
             def _validate_params(self, param_schema: Dict[str, Any], params: Dict[str, Any]) -> bool:
                 """Validate action parameters"""
                 try:
-                    from jsonschema import validate
                     validate(instance=params, schema=param_schema)
                     return True
                 except Exception:
