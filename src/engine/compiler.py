@@ -28,8 +28,9 @@ class ScenarioCompiler:
         """Create a LangChain tool from an action"""
         
         class ActionTool(BaseTool):
-            name = action.id
-            description = f"Action: {action.id}"
+            # Pydantic v2/LC tools require annotated fields
+            name: str = action.id
+            description: str = f"Action: {action.id}"
             
             def _run(self, **kwargs) -> str:
                 """Execute the action"""
