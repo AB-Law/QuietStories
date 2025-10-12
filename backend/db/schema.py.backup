@@ -5,15 +5,16 @@ This module defines the database tables for storing scenarios and game sessions.
 All data is stored in a single SQLite database file for easy backup and portability.
 """
 
-# mypy: ignore-errors
-
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import JSON, Column, DateTime, Integer, String, Text, create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, MappedAsDataclass, sessionmaker
 
-Base = declarative_base()  # type: ignore
+
+class Base(DeclarativeBase):
+    """Modern SQLAlchemy 2.0 declarative base with proper typing support."""
+    pass
 
 
 class Scenario(Base):
@@ -31,12 +32,12 @@ class Scenario(Base):
 
     __tablename__ = "scenarios"
 
-    id = Column(String, primary_key=True)
-    name = Column(String, nullable=False)
-    spec = Column(JSON, nullable=False)
-    status = Column(String, nullable=False, default="generated")
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(
+    id: Mapped[str] = Column(String, primary_key=True)
+    name: Mapped[str] = Column(String, nullable=False)
+    spec: Mapped[dict] = Column(JSON, nullable=False)
+    status: Mapped[str] = Column(String, nullable=False, default="generated")
+    created_at: Mapped[datetime] = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = Column(
         DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
@@ -63,19 +64,19 @@ class Session(Base):
 
     __tablename__ = "sessions"
 
-    id = Column(String, primary_key=True)
-    scenario_id = Column(String, nullable=False)
-    seed = Column(Integer, nullable=True)
-    state = Column(JSON, nullable=False)
-    turn = Column(Integer, nullable=False, default=0)
-    turn_history = Column(JSON, nullable=False, default=list)
-    world_background = Column(Text, nullable=True)
-    entities = Column(JSON, nullable=False, default=list)
-    private_memory = Column(JSON, nullable=False, default=dict)
-    public_memory = Column(JSON, nullable=False, default=dict)
-    status = Column(String, nullable=False, default="active")
-    scenario_spec = Column(JSON, nullable=True)  # Cached scenario spec
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(
+    id: Mapped[str] = Column(String, primary_key=True)
+    scenario_id: Mapped[str] = Column(String, nullable=False)
+    seed: Mapped[Optional[int]] = Column(Integer, nullable=True)
+    state: Mapped[dict] = Column(JSON, nullable=False)
+    turn: Mapped[int] = Column(Integer, nullable=False, default=0)
+    turn_history: Mapped[list] = Column(JSON, nullable=False, default=list)
+    world_background: Mapped[Optional[str]] = Column(Text, nullable=True)
+    entities: Mapped[list] = Column(JSON, nullable=False, default=list)
+    private_memory: Mapped[dict] = Column(JSON, nullable=False, default=dict)
+    public_memory: Mapped[dict] = Column(JSON, nullable=False, default=dict)
+    status: Mapped[str] = Column(String, nullable=False, default="active")
+    scenario_spec: Mapped[Optional[dict]] = Column(JSON, nullable=True)  # Cached scenario spec
+    created_at: Mapped[datetime] = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = Column(
         DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
     )

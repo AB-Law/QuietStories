@@ -140,4 +140,3 @@ This frontend is designed to be extensible and modular. To add new features:
 - Memory viewing supports both private and public memory types
 - The chat interface automatically scrolls to the latest message
 - All API calls include proper error handling
-

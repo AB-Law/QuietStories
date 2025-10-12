@@ -4,9 +4,11 @@ Schema validation utilities
 
 import json
 from typing import Any, Dict, List, Optional
-from jsonschema import validate, ValidationError
-from .scenario import ScenarioSpec
+
+from jsonschema import ValidationError, validate
+
 from .outcome import Outcome
+from .scenario import ScenarioSpec
 
 
 def validate_scenario_spec(spec_data: Dict[str, Any]) -> ScenarioSpec:
@@ -38,14 +40,16 @@ def validate_json_schema(data: Dict[str, Any], schema: Dict[str, Any]) -> bool:
         raise ValueError(f"JSON schema validation failed: {e}")
 
 
-def validate_no_scenario_nouns(text: str, forbidden_nouns: List[str] = None) -> bool:
+def validate_no_scenario_nouns(
+    text: str, forbidden_nouns: Optional[List[str]] = None
+) -> bool:
     """Validate that text contains no forbidden scenario nouns"""
     if forbidden_nouns is None:
         forbidden_nouns = []  # Empty list by default
-    
+
     text_lower = text.lower()
     for noun in forbidden_nouns:
         if noun.lower() in text_lower:
             raise ValueError(f"Forbidden scenario noun found: {noun}")
-    
+
     return True

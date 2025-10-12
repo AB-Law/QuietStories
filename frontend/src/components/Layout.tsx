@@ -17,7 +17,7 @@ export function Layout({ children }: LayoutProps) {
     const savedTheme = localStorage.getItem('theme');
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     const shouldBeDark = savedTheme === 'dark' || (!savedTheme && prefersDark);
-    
+
     setIsDark(shouldBeDark);
     if (shouldBeDark) {
       document.documentElement.classList.add('dark');
@@ -27,7 +27,7 @@ export function Layout({ children }: LayoutProps) {
   const toggleTheme = () => {
     const newIsDark = !isDark;
     setIsDark(newIsDark);
-    
+
     if (newIsDark) {
       document.documentElement.classList.add('dark');
       localStorage.setItem('theme', 'dark');
@@ -100,4 +100,3 @@ export function Layout({ children }: LayoutProps) {
     </div>
   );
 }
-

@@ -2,8 +2,10 @@
 Unit tests for backend utilities.
 """
 
-import pytest
 import logging
+
+import pytest
+
 from backend.utils.logger import get_logger, setup_logging
 
 

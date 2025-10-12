@@ -3,6 +3,7 @@ Unit tests for backend configuration.
 """
 
 import pytest
+
 from backend.config import Settings
 
 
@@ -22,6 +23,7 @@ class TestSettings:
     def test_environment_variables(self):
         """Test that environment variables override defaults"""
         import os
+
         original_env = os.environ.copy()
 
         try:

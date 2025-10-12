@@ -231,7 +231,7 @@ export function AdminPanel() {
                       selectedSession?.id === session.id ? 'bg-accent' : ''
                     }`}
                   >
-                    <div 
+                    <div
                       className="flex items-center justify-between cursor-pointer hover:opacity-80"
                       onClick={() => loadSessionDetails(session.id)}
                     >
@@ -363,4 +363,3 @@ export function AdminPanel() {
     </div>
   );
 }
-
