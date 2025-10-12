@@ -337,3 +337,5 @@ random/data/*.db
 random/data/*.db-journal
 random/data/*.db-wal
 random/data/*.db-shm
+
+random/
