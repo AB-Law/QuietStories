@@ -9,10 +9,15 @@ This module coordinates the game loop, managing:
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 from langchain.schema import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.messages import ToolMessage
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode
+from typing_extensions import TypedDict
 
 from backend.db.manager import DatabaseManager
 from backend.engine.compiler import ScenarioCompiler
@@ -24,6 +29,26 @@ from backend.utils.jsonlogic import JSONLogicEvaluator
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+class AgentState(TypedDict):
+    """
+    Agent state schema for the Langgraph StateGraph.
+
+    This combines messages, game state, and tool results for
+    comprehensive agent state management across turns.
+    """
+
+    messages: Annotated[
+        List[BaseMessage], add_messages
+    ]  # Conversation history with reducer
+    game_state: Dict[str, Any]  # Current scenario state
+    entities: List[Dict[str, Any]]  # Current entity list
+    session_id: str  # Session identifier
+    turn_count: int  # Current turn number
+    tool_results: List[Dict[str, Any]]  # Results from tool executions
+    context: Optional[Dict[str, Any]]  # Additional context data
+    user_input: Optional[str]  # Current user input
 
 
 class TurnOrchestrator:
@@ -75,9 +100,13 @@ class TurnOrchestrator:
             session_id, db_manager, private_memory, public_memory, turn_count
         )
         self.tools = self.compiler.get_tools()
-        self._session_ref: Optional[Dict[str, Any]] = (
-            None  # Will be set to access session data
-        )
+        self._session_ref: Optional[
+            Dict[str, Any]
+        ] = None  # Will be set to access session data
+
+        # Initialize Langgraph components
+        self.checkpointer = InMemorySaver()
+        self.graph = self._build_graph()
 
     def set_session_ref(self, session_ref: Dict[str, Any]):
         """
@@ -88,237 +117,252 @@ class TurnOrchestrator:
         """
         self._session_ref = session_ref
 
-    async def process_turn(self, user_input: Optional[str] = None) -> Outcome:
+    def _build_graph(self) -> StateGraph:
         """
-        Process a single turn of gameplay with multi-turn tool calling.
+        Build the Langgraph StateGraph for agent orchestration.
 
-        This method implements an agentic loop where the LLM can:
-        1. Call tools to read/update state, create characters, etc.
-        2. Receive tool results and continue reasoning
-        3. Finally provide the narrative outcome
-
-        Args:
-            user_input: Optional player action description
+        Creates a graph with agent and tool nodes, replacing the
+        simple while loop with sophisticated state management.
 
         Returns:
-            Outcome object containing narrative and state changes
-
-        Raises:
-            Exception: If LLM call fails and fallback also fails
+            Compiled StateGraph ready for execution
         """
-        logger.info(
-            f"[Orchestrator] Processing turn {self.memory.get_turn_count() + 1} with agentic tool calling"
+        # Create the StateGraph
+        builder = StateGraph(AgentState)
+
+        # Add agent node for LLM calls
+        builder.add_node("agent", self._call_agent)
+
+        # Add tool node for tool execution
+        tool_node = ToolNode(self.tools)
+        builder.add_node("tools", tool_node)
+
+        # Add final outcome node for structured response
+        builder.add_node("outcome", self._generate_outcome)
+
+        # Define the flow
+        builder.add_edge(START, "agent")
+        builder.add_conditional_edges(
+            "agent",
+            self._should_continue,
+            {"tools": "tools", "outcome": "outcome", END: END},
         )
+        builder.add_edge("tools", "agent")
+        builder.add_edge("outcome", END)
 
-        # Build context for the LLM
-        context = self._build_context()
+        # Compile with checkpointer
+        return builder.compile(checkpointer=self.checkpointer)
 
-        # Create initial messages
-        messages = [
-            SystemMessage(content=self._get_system_prompt()),
-            HumanMessage(content=self._get_user_prompt(context, user_input)),
-        ]
+    async def _call_agent(self, state: AgentState) -> Dict[str, Any]:
+        """
+        Agent node: Call LLM to decide on tool usage or final response.
 
-        max_rounds = 5  # Prevent infinite loops
-        round_num = 0
+        Args:
+            state: Current agent state
 
-        logger.info(
-            f"[Orchestrator] 🎯 Starting agentic tool calling loop (max {max_rounds} rounds)"
-        )
-        logger.info(
-            f"[Orchestrator] 🔨 Available tools: {[t.name for t in self.tools]}"
-        )
+        Returns:
+            Updated state with new message
+        """
+        logger.debug("[Agent] Calling LLM for decision making")
 
-        while round_num < max_rounds:
-            round_num += 1
-            logger.info(f"[Orchestrator] 🔄 === Round {round_num}/{max_rounds} ===")
+        # Get the latest messages from state
+        messages = state["messages"]
 
-            # Call LLM with current messages and tools
-            response = await self.provider.chat(messages=messages, tools=self.tools)
+        # Call LLM with tools
+        response = await self.provider.chat(messages=messages, tools=self.tools)
 
-            logger.debug(
-                f"[Orchestrator] Response content preview: {(response.content or '')[:100]}..."
-            )
-            logger.debug(f"[Orchestrator] Has tool calls: {bool(response.tool_calls)}")
-
-            # Add assistant message to conversation
-            # Format tool_calls for LangChain AIMessage
-            formatted_tool_calls = []
-            if response.tool_calls:
-                import json
-
-                for tc in response.tool_calls:
-                    raw_args = tc.get("function", {}).get("arguments", {})
-                    # Parse args if they're a string
-                    if isinstance(raw_args, str):
-                        try:
-                            parsed_args = json.loads(raw_args) if raw_args else {}
-                        except json.JSONDecodeError:
-                            parsed_args = {}
-                    else:
-                        parsed_args = raw_args
-
-                    formatted_tool_calls.append(
-                        {
-                            "name": tc.get("function", {}).get("name"),
-                            "args": parsed_args,
-                            "id": tc.get("id"),
-                            "type": tc.get("type", "function"),
-                        }
-                    )
-
-            # Create AIMessage - only include tool_calls if they exist
-            if formatted_tool_calls:
-                assistant_message = AIMessage(
-                    content=response.content or "", tool_calls=formatted_tool_calls
-                )
-            else:
-                assistant_message = AIMessage(content=response.content or "")
-            messages.append(assistant_message)
-
-            # Check if LLM wants to call tools
-            if response.tool_calls:
-                logger.info(
-                    f"[Orchestrator] 🔧 LLM called {len(response.tool_calls)} tools in round {round_num}"
-                )
-
-                # Execute each tool call
-                for idx, tool_call in enumerate(response.tool_calls, 1):
-                    tool_name = tool_call.get("function", {}).get("name")
-                    tool_args = tool_call.get("function", {}).get("arguments", {})
-                    tool_call_id = tool_call.get("id")
-
-                    logger.info(
-                        f"[Orchestrator] 🔧 Tool {idx}/{len(response.tool_calls)}: {tool_name}"
-                    )
-                    logger.info(f"[Orchestrator]    Raw args: {tool_args}")
-
+        # Format tool_calls for LangChain compatibility
+        formatted_tool_calls = []
+        if response.tool_calls:
+            for tc in response.tool_calls:
+                raw_args = tc.get("function", {}).get("arguments", {})
+                # Parse args if they're a string
+                if isinstance(raw_args, str):
                     try:
-                        # Parse tool arguments if they're a JSON string
-                        if isinstance(tool_args, str):
-                            import json
+                        parsed_args = json.loads(raw_args) if raw_args else {}
+                    except json.JSONDecodeError:
+                        parsed_args = {}
+                else:
+                    parsed_args = raw_args
 
-                            try:
-                                args = json.loads(tool_args) if tool_args else {}
-                            except json.JSONDecodeError:
-                                logger.error(
-                                    f"[Orchestrator] ✗ Failed to parse tool args as JSON: {tool_args}"
-                                )
-                                args = {}
-                        elif isinstance(tool_args, dict):
-                            args = tool_args
-                        else:
-                            logger.warning(
-                                f"[Orchestrator] ⚠ Unexpected tool_args type: {type(tool_args)}"
-                            )
-                            args = {}
-
-                        logger.info(f"[Orchestrator]    Parsed args: {args}")
-
-                        # Find and execute the tool
-                        tool_result = await self._execute_tool(tool_name, args)
-
-                        # Add tool result to messages
-                        tool_message = ToolMessage(
-                            content=str(tool_result), tool_call_id=tool_call_id
-                        )
-                        messages.append(tool_message)
-
-                        logger.info(
-                            f"[Orchestrator] ✓ Tool {tool_name} result: {tool_result}"
-                        )
-
-                    except Exception as e:
-                        logger.error(
-                            f"[Orchestrator] ✗ Tool {tool_name} execution failed: {e}"
-                        )
-                        # Add error result to messages
-                        tool_message = ToolMessage(
-                            content=f"Error executing tool {tool_name}: {e}",
-                            tool_call_id=tool_call_id,
-                        )
-                        messages.append(tool_message)
-
-                # Continue to next round since tools were called
-                logger.info(
-                    f"[Orchestrator] 🔄 Continuing to next round with tool results..."
+                formatted_tool_calls.append(
+                    {
+                        "name": tc.get("function", {}).get("name"),
+                        "args": parsed_args,
+                        "id": tc.get("id"),
+                        "type": tc.get("type", "function"),
+                    }
                 )
-                continue
-            else:
-                # LLM is done with tools, break to get final narrative
-                logger.info(
-                    f"[Orchestrator] ✅ LLM finished tool calls after {round_num} rounds"
-                )
-                break
 
-        # Check if we hit max rounds
-        if round_num >= max_rounds:
-            logger.warning(
-                f"[Orchestrator] ⚠ Hit maximum rounds ({max_rounds}), forcing final narrative"
+        # Create AIMessage
+        if formatted_tool_calls:
+            assistant_message = AIMessage(
+                content=response.content or "", tool_calls=formatted_tool_calls
             )
+        else:
+            assistant_message = AIMessage(content=response.content or "")
 
-        # Now get the final narrative with structured output
-        logger.info(
-            "[Orchestrator] 📖 Requesting final structured narrative outcome from LLM"
-        )
+        return {"messages": [assistant_message]}
+
+    def _should_continue(self, state: AgentState) -> str:
+        """
+        Conditional routing function to decide next step.
+
+        Args:
+            state: Current agent state
+
+        Returns:
+            Next node name: "tools", "outcome", or END
+        """
+        messages = state["messages"]
+        last_message = messages[-1]
+
+        # If the LLM made tool calls, execute tools
+        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+            logger.debug(
+                f"[Router] Routing to tools: {len(last_message.tool_calls)} tool calls"
+            )
+            return "tools"
+
+        # Check if we've exceeded max rounds (simple counter from tool_results)
+        tool_results_count = len(state.get("tool_results", []))
+        max_rounds = 5
+
+        if tool_results_count >= max_rounds:
+            logger.debug(
+                f"[Router] Max rounds reached ({max_rounds}), routing to outcome"
+            )
+            return "outcome"
+
+        # Check if response looks like final narrative (simple heuristic)
+        content = last_message.content or ""
+        if any(
+            keyword in content.lower()
+            for keyword in ["narrative", "story", "continues", "outcome"]
+        ):
+            logger.debug("[Router] Detected narrative content, routing to outcome")
+            return "outcome"
+
+        # Default to outcome for final structured response
+        logger.debug("[Router] Routing to outcome for final response")
+        return "outcome"
+
+    async def _generate_outcome(self, state: AgentState) -> Dict[str, Any]:
+        """
+        Generate final structured outcome from agent reasoning.
+
+        Args:
+            state: Current agent state
+
+        Returns:
+            Updated state with structured outcome
+        """
+        logger.debug("[Outcome] Generating structured outcome")
+
+        # Add request for structured outcome
+        messages = state["messages"]
         messages.append(
             HumanMessage(
                 content="Now provide the final narrative outcome as structured JSON with the Outcome schema."
             )
         )
 
+        # Get structured response
         final_response = await self.provider.chat(
             messages=messages, json_schema=self._get_outcome_schema()
         )
 
-        if not final_response.content or final_response.content.strip() == "":
-            logger.error("[Orchestrator] ✗ Empty final content from provider!")
+        return {
+            "messages": [
+                HumanMessage(content=f"Generated outcome: {final_response.content}")
+            ]
+        }
+
+    async def process_turn(self, user_input: Optional[str] = None) -> Outcome:
+        """
+        Process a single turn using Langgraph StateGraph.
+
+        This method replaces the old while-loop implementation with
+        a sophisticated stateful agent workflow using Langgraph.
+
+        Args:
+            user_input: Optional player action description
+
+        Returns:
+            Outcome object containing narrative and state changes
+        """
+        logger.info(
+            f"[Orchestrator] Processing turn {self.memory.get_turn_count() + 1} with Langgraph StateGraph"
+        )
+
+        # Build context for the LLM
+        context = self._build_context()
+
+        # Initialize agent state
+        initial_state: AgentState = {
+            "messages": [
+                SystemMessage(content=self._get_system_prompt()),
+                HumanMessage(content=self._get_user_prompt(context, user_input)),
+            ],
+            "game_state": self.spec.state,
+            "entities": self.spec.entities,
+            "session_id": self.session_id,
+            "turn_count": self.memory.get_turn_count(),
+            "tool_results": [],
+            "context": context,
+            "user_input": user_input,
+        }
+
+        # Configure graph execution with thread ID
+        config = {"configurable": {"thread_id": self.session_id}}
+
+        logger.info("[Orchestrator] 🎯 Starting Langgraph agent execution")
+        logger.info(f"[Orchestrator] 🔨 Available tools: {[t.name for t in self.tools]}")
+
+        try:
+            # Execute the graph
+            final_state = await self.graph.ainvoke(initial_state, config)
+
+            # Extract the final response for outcome parsing
+            messages = final_state["messages"]
+            final_message = None
+
+            # Find the last assistant message with content
+            for msg in reversed(messages):
+                if hasattr(msg, "content") and msg.content and msg.content.strip():
+                    final_message = msg
+                    break
+
+            if not final_message:
+                logger.warning("[Orchestrator] No final message found, using fallback")
+                outcome = Outcome(
+                    narrative="The story continues...",
+                    state_changes=[],
+                    visible_dialogue=None,
+                    roll_requests=None,
+                    hidden_memory_updates=None,
+                )
+            else:
+                # Parse outcome from final message
+                outcome = self._parse_outcome(final_message.content)
+
+        except Exception as e:
+            logger.error(f"[Orchestrator] Langgraph execution failed: {e}")
             # Fallback to minimal outcome
-            return Outcome(
+            outcome = Outcome(
                 narrative="The story continues...",
                 state_changes=[],
                 visible_dialogue=None,
                 roll_requests=None,
                 hidden_memory_updates=None,
             )
-        else:
-            # Parse and validate outcome
-            logger.debug(
-                f"[Orchestrator] Final content preview: {final_response.content[:300]}"
-            )
-            outcome = self._parse_outcome(final_response.content)
 
-        # Log outcome summary
-        logger.info(
-            f"[Orchestrator] 📖 Narrative length: {len(outcome.narrative)} chars"
-        )
-        logger.info(f"[Orchestrator] 🔄 State changes: {len(outcome.state_changes)}")
-        if outcome.hidden_memory_updates:
-            logger.info(
-                f"[Orchestrator] 🧠 Memory updates: {len(outcome.hidden_memory_updates)}"
-            )
-
-        # Apply state changes
+        # Apply state changes and update memory (existing logic)
         if outcome.state_changes:
             logger.info(
                 f"[Orchestrator] Applying {len(outcome.state_changes)} state changes..."
             )
-            for i, change in enumerate(outcome.state_changes, 1):
-                logger.debug(
-                    f"[Orchestrator]   {i}. {change.op} {change.path} = {str(change.value)[:50]}"
-                )
-        self._apply_state_changes(outcome.state_changes)
-
-        # Update memory - but skip if LLM already used add_memory tool
-        # (to avoid duplicates from both tool calls and hidden_memory_updates)
-        if outcome.hidden_memory_updates:
-            logger.info(
-                f"[Orchestrator] 🧠 Skipping hidden_memory_updates (memories already saved via tools)"
-            )
-            logger.debug(
-                f"[Orchestrator] Note: LLM should use add_memory tool during thinking, not hidden_memory_updates in outcome"
-            )
-            # self._update_memory(outcome.hidden_memory_updates)  # Disabled to prevent duplicates
+            self._apply_state_changes(outcome.state_changes)
 
         # Increment turn counter
         self.memory.increment_turn()
