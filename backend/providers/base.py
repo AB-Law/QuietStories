@@ -37,7 +37,7 @@ class BaseProvider(ABC):
         tools: Optional[List[BaseTool]] = None,
         json_schema: Optional[Dict[str, Any]] = None,
         stream: bool = False,
-        **kwargs
+        **kwargs,
     ) -> Union[ProviderResponse, Any]:
         """
         Send a chat request to the LLM provider
