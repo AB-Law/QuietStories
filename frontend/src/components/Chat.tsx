@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import { Button } from './ui/Button';
 import { apiService } from '../services/api';
-import type { Session, TurnResponse } from '../services/api';
+import type { Session, TurnResponse, Entity } from '../services/api';
 import { Send, Loader2, Plus, Sparkles } from 'lucide-react';
 
 interface Message {
@@ -225,7 +225,7 @@ export function Chat() {
         const updatedSession = await apiService.getSession(currentSession.id);
         console.log('Updated session entities:', updatedSession.entities?.length, 'entities');
         if (updatedSession.entities) {
-          updatedSession.entities.forEach((e: any) => {
+          updatedSession.entities.forEach((e: Entity) => {
             console.log(`  - ${e.id || e.name}: background=${e.background ? 'YES' : 'NO'}`);
           });
         }
@@ -492,13 +492,12 @@ export function Chat() {
             <CardTitle className="text-lg">World Info</CardTitle>
           </CardHeader>
           <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
-            {/* Scenario Name */}
-            {currentSession.scenario_spec?.name && (
+            {currentSession.scenario_spec?.name ? (
               <div>
                 <h3 className="font-semibold text-sm text-muted-foreground mb-1">Scenario</h3>
-                <p className="text-sm">{currentSession.scenario_spec.name}</p>
+                <p className="text-sm">{currentSession.scenario_spec.name as string}</p>
               </div>
-            )}
+            ) : null}
 
             {/* Turn Counter */}
             <div>
