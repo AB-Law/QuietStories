@@ -4,9 +4,9 @@ Scenario compiler - converts specs to executable tools
 
 from typing import Dict, Any, List
 from langchain.tools import BaseTool
-from src.schemas import ScenarioSpec, Action
-from src.utils.jsonlogic import JSONLogicEvaluator
-from src.schemas.outcome import StateChange
+from backend.schemas import ScenarioSpec, Action
+from backend.utils.jsonlogic import JSONLogicEvaluator
+from backend.schemas.outcome import StateChange
 from jsonschema import validate
 
 

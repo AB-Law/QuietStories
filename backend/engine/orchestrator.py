@@ -12,14 +12,14 @@ from typing import Dict, Any, List, Optional
 import json
 from langchain.schema import BaseMessage, SystemMessage, HumanMessage, AIMessage
 from langchain_core.messages import ToolMessage
-from src.providers import create_provider
-from src.schemas import Outcome, ScenarioSpec
-from src.engine.compiler import ScenarioCompiler
-from src.engine.memory import MemoryManager
-from src.utils.jsonlogic import JSONLogicEvaluator
-from src.prompts import NARRATOR_SYSTEM, NARRATOR_USER
-from src.utils.logger import get_logger
-from src.db.manager import DatabaseManager
+from backend.providers import create_provider
+from backend.schemas import Outcome, ScenarioSpec
+from backend.engine.compiler import ScenarioCompiler
+from backend.engine.memory import MemoryManager
+from backend.utils.jsonlogic import JSONLogicEvaluator
+from backend.prompts import NARRATOR_SYSTEM, NARRATOR_USER
+from backend.utils.logger import get_logger
+from backend.db.manager import DatabaseManager
 
 logger = get_logger(__name__)
 
