@@ -25,13 +25,13 @@ PROMPT_ENRICHMENT_USER = """Original scenario: {description}
 Add minimal context (1-2 sentences max) to clarify this for story generation:"""
 
 
-# Scenario generation - converts enriched prompt to ScenarioSpec  
+# Scenario generation - converts enriched prompt to ScenarioSpec
 SCENARIO_GENERATION_SYSTEM = """You create ScenarioSpec JSON for interactive stories.
 
 ⚠️ CRITICAL: Copy these EXACT field names or validation will FAIL:
 
 In effects array: {{"op": "set", "path": "...", "value": ...}}
-  ❌ WRONG: "operation" 
+  ❌ WRONG: "operation"
   ✅ CORRECT: "op"
 
 In actions: {{"id": "...", "params": {{}}, "preconditions": {{}}, "effects": [...]}}
@@ -268,10 +268,9 @@ What happens next?"""
 # Compiler validation
 VALIDATION_ERROR_MESSAGES = {
     "missing_loss_conditions": "Scenario must have at least 2 loss conditions",
-    "missing_negativity_budget": "Scenario must have a non-zero negativity budget", 
+    "missing_negativity_budget": "Scenario must have a non-zero negativity budget",
     "invalid_weight": "Event weight must be between 0.05 and 0.30",
     "invalid_effect_op": "Invalid effect operation: {op}. Must be one of: set, inc, dec, mul, patch, push, pop, addlog",
     "missing_required_field": "Missing required field: {field}",
     "invalid_jsonlogic": "Invalid JSONLogic expression in {location}",
 }
-
