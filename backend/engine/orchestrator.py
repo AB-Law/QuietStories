@@ -49,6 +49,8 @@ class AgentState(TypedDict):
     tool_results: List[Dict[str, Any]]  # Results from tool executions
     context: Optional[Dict[str, Any]]  # Additional context data
     user_input: Optional[str]  # Current user input
+    conversation_summary: Optional[Dict[str, Any]]  # Summary for persistence
+    memory_state: Optional[Dict[str, Any]]  # Memory manager state snapshot
 
 
 class TurnOrchestrator:
@@ -108,6 +110,24 @@ class TurnOrchestrator:
         self.checkpointer = InMemorySaver()
         self.graph = self._build_graph()
 
+    def _get_memory_state_snapshot(self) -> Dict[str, Any]:
+        """
+        Create a snapshot of the current memory manager state for persistence.
+
+        Returns:
+            Dictionary containing memory state information
+        """
+        return {
+            "turn_count": self.memory.get_turn_count(),
+            "private_memory_keys": list(self.memory.private_memory.keys())
+            if hasattr(self.memory, "private_memory")
+            else [],
+            "public_memory_size": len(self.memory.public_memory)
+            if hasattr(self.memory, "public_memory")
+            else 0,
+            "session_id": self.memory.session_id,
+        }
+
     def set_session_ref(self, session_ref: Dict[str, Any]):
         """
         Set reference to session data for accessing turn history.
@@ -165,6 +185,13 @@ class TurnOrchestrator:
         """
         logger.debug("[Agent] Calling LLM for decision making")
 
+        # Update game state in messages if it has changed
+        current_game_state = state["game_state"]
+        current_entities = state["entities"]
+
+        # Build fresh context with current state
+        fresh_context = self._build_context_from_state(state)
+
         # Get the latest messages from state
         messages = state["messages"]
 
@@ -202,7 +229,13 @@ class TurnOrchestrator:
         else:
             assistant_message = AIMessage(content=response.content or "")
 
-        return {"messages": [assistant_message]}
+        # Update state with fresh context
+        return {
+            "messages": [assistant_message],
+            "context": fresh_context,
+            "game_state": self.spec.state,  # Keep state synchronized
+            "entities": self.spec.entities,
+        }
 
     def _should_continue(self, state: AgentState) -> str:
         """
@@ -272,10 +305,50 @@ class TurnOrchestrator:
             messages=messages, json_schema=self._get_outcome_schema()
         )
 
+        # Store conversation history in state for persistence
+        conversation_summary = self._summarize_conversation(messages)
+
         return {
             "messages": [
                 HumanMessage(content=f"Generated outcome: {final_response.content}")
-            ]
+            ],
+            "conversation_summary": conversation_summary,
+        }
+
+    def _summarize_conversation(self, messages: List[BaseMessage]) -> Dict[str, Any]:
+        """
+        Create a summary of the conversation for state persistence.
+
+        Args:
+            messages: List of messages from the conversation
+
+        Returns:
+            Dictionary containing conversation summary
+        """
+        # Count different message types
+        human_messages = [m for m in messages if isinstance(m, HumanMessage)]
+        ai_messages = [m for m in messages if isinstance(m, AIMessage)]
+        tool_messages = [m for m in messages if isinstance(m, ToolMessage)]
+
+        # Extract tool usage patterns
+        tools_used = []
+        for ai_msg in ai_messages:
+            if hasattr(ai_msg, "tool_calls") and ai_msg.tool_calls:
+                for tool_call in ai_msg.tool_calls:
+                    tool_name = tool_call.get("name", "unknown")
+                    if tool_name not in tools_used:
+                        tools_used.append(tool_name)
+
+        return {
+            "total_messages": len(messages),
+            "human_messages": len(human_messages),
+            "ai_messages": len(ai_messages),
+            "tool_messages": len(tool_messages),
+            "tools_used": tools_used,
+            "last_user_input": human_messages[-1].content if human_messages else None,
+            "conversation_length": sum(
+                len(m.content or "") for m in messages if hasattr(m, "content")
+            ),
         }
 
     async def process_turn(self, user_input: Optional[str] = None) -> Outcome:
@@ -311,6 +384,8 @@ class TurnOrchestrator:
             "tool_results": [],
             "context": context,
             "user_input": user_input,
+            "conversation_summary": None,
+            "memory_state": self._get_memory_state_snapshot(),
         }
 
         # Configure graph execution with thread ID
@@ -372,6 +447,50 @@ class TurnOrchestrator:
         self.memory.save_to_database()
 
         return outcome
+
+    def _build_context_from_state(self, state: AgentState) -> Dict[str, Any]:
+        """
+        Build context from current agent state for enhanced state management.
+
+        This method creates fresh context incorporating the current state
+        from the Langgraph AgentState, ensuring consistency across tool calls.
+
+        Args:
+            state: Current agent state from Langgraph
+
+        Returns:
+            Dictionary containing updated context information
+        """
+        # Use current state from agent state
+        current_game_state = state["game_state"]
+        current_entities = state["entities"]
+        current_turn_count = state["turn_count"]
+
+        # Get POV entity's private memory + all public memory
+        pov_entity = self._get_pov_entity()
+        private_memory = self.memory.get_private_memory(pov_entity)
+        public_memory = self.memory.get_public_memory()
+
+        # Get turn history for context
+        recent_turns = self._get_recent_turns(3)  # Last 3 turns verbatim
+        history_summary = self._get_history_summary()  # Summarized older turns
+
+        # Get world background if available
+        world_background = None
+        if self._session_ref and "world_background" in self._session_ref:
+            world_background = self._session_ref["world_background"]
+
+        return {
+            "state": current_game_state,
+            "entities": current_entities,
+            "recent_turns": recent_turns,
+            "history_summary": history_summary,
+            "private_memory": private_memory,
+            "public_memory": public_memory,
+            "turn": current_turn_count,
+            "available_actions": self._get_available_actions(),
+            "world_background": world_background,
+        }
 
     def _build_context(self) -> Dict[str, Any]:
         """
