@@ -12,12 +12,12 @@ from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
 import uuid
 import json
-from src.schemas import Outcome, ScenarioSpec
-from src.engine.orchestrator import TurnOrchestrator
-from src.engine.initializer import SessionInitializer
-from src.db.manager import DatabaseManager
-from src.config import settings
-from src.utils.logger import get_logger
+from backend.schemas import Outcome, ScenarioSpec
+from backend.engine.orchestrator import TurnOrchestrator
+from backend.engine.initializer import SessionInitializer
+from backend.db.manager import DatabaseManager
+from backend.config import settings
+from backend.utils.logger import get_logger
 
 # Set up logging
 logger = get_logger(__name__)
@@ -189,10 +189,9 @@ async def create_session(request: SessionCreateRequest):
 async def stream_turns(session_id: str):
     """Stream turns for a session (SSE)"""
     
-    if session_id not in sessions_db:
+    session = db.get_session(session_id)
+    if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    
-    session = sessions_db[session_id]
     
     async def generate_turns():
         """Generate turn events for SSE streaming"""
@@ -356,7 +355,7 @@ async def process_turn(session_id: str, request: SessionTurnRequest):
         
         # Fallback to minimal response
         logger.warning("Creating fallback response...")
-        from src.schemas.outcome import StateChange
+        from backend.schemas.outcome import StateChange
         
         outcome = Outcome(
             narrative=f"Something unexpected happened. Error: {str(e)}",

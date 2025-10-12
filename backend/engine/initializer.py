@@ -8,9 +8,9 @@ when a new game session starts, enhancing the player's immersion.
 from typing import Dict, Any, List
 import json
 from langchain.schema import SystemMessage, HumanMessage
-from src.schemas import ScenarioSpec
-from src.providers import create_provider
-from src.utils.logger import get_logger
+from backend.schemas import ScenarioSpec
+from backend.providers import create_provider
+from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

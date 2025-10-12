@@ -5,9 +5,9 @@ Scenario validator with Monte Carlo simulation for auto-balancing
 import random
 import json
 from typing import Dict, Any, List, Tuple
-from src.schemas import ScenarioSpec, validate_scenario_spec
-from src.config import settings
-from src.utils.jsonlogic import JSONLogicEvaluator
+from backend.schemas import ScenarioSpec, validate_scenario_spec
+from backend.config import settings
+from backend.utils.jsonlogic import JSONLogicEvaluator
 
 
 class ScenarioValidator:

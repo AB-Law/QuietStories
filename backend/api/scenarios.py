@@ -9,12 +9,12 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import Dict, Any, List
 import uuid
-from src.engine.generator import ScenarioGenerator
-from src.engine.validator import ScenarioValidator
-from src.schemas import ScenarioSpec
-from src.db.manager import DatabaseManager
-from src.config import settings
-from src.utils.logger import get_logger
+from backend.engine.generator import ScenarioGenerator
+from backend.engine.validator import ScenarioValidator
+from backend.schemas import ScenarioSpec
+from backend.db.manager import DatabaseManager
+from backend.config import settings
+from backend.utils.logger import get_logger
 
 # Set up logging
 logger = get_logger(__name__)
