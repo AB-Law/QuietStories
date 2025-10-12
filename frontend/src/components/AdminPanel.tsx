@@ -108,7 +108,7 @@ export function AdminPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const renderDynamicData = (data: any, depth = 0) => {
+  const renderDynamicData = (data: unknown, depth = 0) => {
     if (data === null || data === undefined) {
       return <span className="text-muted-foreground italic">null</span>;
     }
