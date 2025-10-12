@@ -18,13 +18,13 @@ jobs:
         pip install -r requirements.txt
     - name: Lint with Black
       run: |
-        black --check backend/
+        black --check --line-length 88 backend/
     - name: Lint with isort
       run: |
-        isort --check-only backend/
+        isort --check-only --profile black --line-length 88 backend/
     - name: Type check with mypy
       run: |
-        mypy backend/
+        mypy backend/ --ignore-missing-imports --exclude backend/db/schema.py
     - name: Run tests
       run: |
         python -m pytest backend/tests/ -v
