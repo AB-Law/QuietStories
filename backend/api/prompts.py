@@ -5,10 +5,10 @@ Prompt enrichment API endpoints
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from src.prompts import PROMPT_ENRICHMENT_SYSTEM, PROMPT_ENRICHMENT_USER
-from src.providers.factory import create_provider
-from src.config import settings
-from src.utils.logger import get_logger
+from backend.prompts import PROMPT_ENRICHMENT_SYSTEM, PROMPT_ENRICHMENT_USER
+from backend.providers.factory import create_provider
+from backend.config import settings
+from backend.utils.logger import get_logger
 
 # Set up logging
 logger = get_logger(__name__)
@@ -124,7 +124,7 @@ async def list_prompt_templates():
     """
     logger.debug("Listing prompt templates")
     
-    from src.prompts import (
+    from backend.prompts import (
         PROMPT_ENRICHMENT_SYSTEM,
         SCENARIO_GENERATION_SYSTEM,
         NARRATOR_SYSTEM

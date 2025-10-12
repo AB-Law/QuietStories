@@ -3,7 +3,7 @@ Test schema validation
 """
 
 import pytest
-from src.schemas import ScenarioSpec, Outcome, validate_scenario_spec, validate_outcome
+from backend.schemas import ScenarioSpec, Outcome, validate_scenario_spec, validate_outcome
 
 
 def test_scenario_spec_validation():

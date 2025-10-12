@@ -4,7 +4,7 @@ Debug utilities for QuietStories
 Provides helpful debugging functions and decorators.
 
 Usage:
-    from src.utils.debug import debug_point, debug_var, time_it, trace_calls
+    from backend.utils.debug import debug_point, debug_var, time_it, trace_calls
     
     # Quick debug print
     debug_var(my_variable, "my_variable")
@@ -29,7 +29,7 @@ import traceback
 import json
 import sys
 from typing import Any, Optional, Callable
-from src.utils.logger import get_logger
+from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

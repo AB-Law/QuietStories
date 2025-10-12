@@ -6,9 +6,9 @@ import json
 import random
 from typing import Dict, Any, List
 from langchain.schema import SystemMessage, HumanMessage
-from src.providers import create_provider
-from src.schemas import ScenarioSpec, validate_scenario_spec
-from src.prompts import SCENARIO_GENERATION_SYSTEM, SCENARIO_GENERATION_USER
+from backend.providers import create_provider
+from backend.schemas import ScenarioSpec, validate_scenario_spec
+from backend.prompts import SCENARIO_GENERATION_SYSTEM, SCENARIO_GENERATION_USER
 
 
 class ScenarioGenerator:

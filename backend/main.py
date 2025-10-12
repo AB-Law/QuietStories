@@ -5,11 +5,11 @@ FastAPI application for the Dynamic CYOA Engine
 import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from src.config import settings
-from src.api.scenarios import router as scenarios_router
-from src.api.sessions import router as sessions_router
-from src.api.prompts import router as prompts_router
-from src.utils.logger import setup_logging, get_logger
+from backend.config import settings
+from backend.api.scenarios import router as scenarios_router
+from backend.api.sessions import router as sessions_router
+from backend.api.prompts import router as prompts_router
+from backend.utils.logger import setup_logging, get_logger
 
 # Initialize logging
 # Get log level from environment variable, default to INFO
@@ -62,7 +62,7 @@ async def startup_event():
     logger.info("="*60)
     
     # Initialize database
-    from src.db.manager import DatabaseManager
+    from backend.db.manager import DatabaseManager
     db = DatabaseManager(settings.database_path)
     logger.info(f"✓ Database initialized: {settings.database_path}")
     
@@ -99,7 +99,7 @@ if __name__ == "__main__":
     logger.info(f"Starting server on {settings.host}:{settings.port}")
     logger.info(f"Debug mode: {settings.debug}")
     uvicorn.run(
-        "src.main:app",
+        "backend.main:app",
         host=settings.host,
         port=settings.port,
         reload=settings.debug,

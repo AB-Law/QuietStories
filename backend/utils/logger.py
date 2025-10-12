@@ -9,7 +9,7 @@ Provides different logging levels and formats for better debugging:
 - CRITICAL: Critical messages for very serious errors
 
 Usage:
-    from src.utils.logger import get_logger, setup_logging
+    from backend.utils.logger import get_logger, setup_logging
     
     # Setup logging at application start
     setup_logging(level="INFO")  # or "DEBUG", "WARNING", "ERROR"
