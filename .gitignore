@@ -339,3 +339,5 @@ random/data/*.db-wal
 random/data/*.db-shm
 
 random/
+.copilot-tracking/
+planning-mode.chatmode.md
