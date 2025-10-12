@@ -125,9 +125,9 @@ class TurnOrchestrator:
             session_id, db_manager, private_memory, public_memory, turn_count
         )
         self.tools = self.compiler.get_tools()
-        self._session_ref: Optional[
-            Dict[str, Any]
-        ] = None  # Will be set to access session data
+        self._session_ref: Optional[Dict[str, Any]] = (
+            None  # Will be set to access session data
+        )
 
         # Initialize Langgraph components
         self.checkpointer = InMemorySaver()
@@ -468,9 +468,7 @@ class TurnOrchestrator:
             "effectiveness": (
                 "high"
                 if success_rate > 0.8
-                else "medium"
-                if success_rate > 0.5
-                else "low"
+                else "medium" if success_rate > 0.5 else "low"
             ),
         }
 
@@ -761,7 +759,9 @@ class TurnOrchestrator:
         config = {"configurable": {"thread_id": self.session_id}}
 
         logger.info("[Orchestrator] 🎯 Starting Langgraph agent execution")
-        logger.info(f"[Orchestrator] 🔨 Available tools: {[t.name for t in self.tools]}")
+        logger.info(
+            f"[Orchestrator] 🔨 Available tools: {[t.name for t in self.tools]}"
+        )
 
         try:
             # Execute the graph
