@@ -10,7 +10,7 @@ export interface TurnRecord {
   timestamp: string;
   user_action?: string;
   narrative: string;
-  state_changes: Array<{ op: string; path: string; value?: any }>;
+  state_changes: Array<{ op: string; path: string; value?: unknown }>;
   visible_dialogue?: Array<{ entity_id: string; utterance: string }>;
   roll_requests?: Array<{ kind: string; target?: string; difficulty?: number }>;
 }
@@ -20,6 +20,7 @@ export interface Entity {
   type: string;
   name?: string;
   background?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any; // Allow additional properties
 }
 
@@ -28,11 +29,11 @@ export interface Session {
   scenario_id: string;
   turn: number;
   status: string;
-  state?: Record<string, any>;
+  state?: Record<string, unknown>;
   turn_history?: TurnRecord[];
   world_background?: string;
   entities?: Entity[];
-  scenario_spec?: Record<string, any>;
+  scenario_spec?: Record<string, unknown>;
   created_at?: string;
   updated_at?: string;
 }
@@ -42,7 +43,7 @@ export interface SessionConfig {
   generate_world_background?: boolean;
   generate_entity_backgrounds?: boolean;
   initial_entities?: Entity[];
-  custom_state?: Record<string, any>;
+  custom_state?: Record<string, unknown>;
 }
 
 export interface SessionCreateRequest {
@@ -53,7 +54,7 @@ export interface SessionCreateRequest {
 
 export interface TurnRequest {
   action?: string;
-  parameters?: Record<string, any>;
+  parameters?: Record<string, unknown>;
 }
 
 export interface TurnResponse {
@@ -62,13 +63,22 @@ export interface TurnResponse {
   outcome: {
     narrative: string;
     visible_dialogue?: Array<{ entity_id: string; utterance: string }>;
-    state_changes: Array<{ op: string; path: string; value?: any }>;
+    state_changes: Array<{ op: string; path: string; value?: unknown }>;
     roll_requests?: Array<{ kind: string; target?: string; difficulty?: number }>;
   };
 }
 
-export interface ScenarioGenerateRequest {
-  description: string;
+export interface ScenarioGenerateResponse {
+  id: string;
+  name: string;
+  spec_version: string;
+  status: string;
+}
+
+export interface ScenarioCompileResponse {
+  id: string;
+  status: string;
+  validation_results: Record<string, unknown>;
 }
 
 export interface Memory {
@@ -153,7 +163,7 @@ class ApiService {
   }
 
   // Scenario Management
-  async generateScenario(description: string): Promise<any> {
+  async generateScenario(description: string): Promise<ScenarioGenerateResponse> {
     const response = await fetch(`${this.baseUrl}/scenarios/generate`, {
       method: 'POST',
       headers: {
@@ -169,7 +179,7 @@ class ApiService {
     return response.json();
   }
 
-  async compileScenario(scenarioId: string): Promise<any> {
+  async compileScenario(scenarioId: string): Promise<ScenarioCompileResponse> {
     const response = await fetch(`${this.baseUrl}/scenarios/${scenarioId}/compile`, {
       method: 'POST',
     });

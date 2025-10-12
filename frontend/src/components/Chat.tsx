@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import { Button } from './ui/Button';
 import { apiService } from '../services/api';
-import type { Session, TurnResponse } from '../services/api';
+import type { Session, TurnResponse, Entity } from '../services/api';
 import { Send, Loader2, Plus, Sparkles } from 'lucide-react';
 
 interface Message {
@@ -225,7 +225,7 @@ export function Chat() {
         const updatedSession = await apiService.getSession(currentSession.id);
         console.log('Updated session entities:', updatedSession.entities?.length, 'entities');
         if (updatedSession.entities) {
-          updatedSession.entities.forEach((e: any) => {
+          updatedSession.entities.forEach((e: Entity) => {
             console.log(`  - ${e.id || e.name}: background=${e.background ? 'YES' : 'NO'}`);
           });
         }
