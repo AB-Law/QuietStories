@@ -10,8 +10,8 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 from sqlalchemy import create_engine, desc
 from sqlalchemy.orm import sessionmaker, Session as DBSession
-from src.db.schema import Base, Scenario, Session
-from src.utils.logger import get_logger
+from backend.db.schema import Base, Scenario, Session
+from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
