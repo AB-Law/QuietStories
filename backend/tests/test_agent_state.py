@@ -26,8 +26,8 @@ class TestAgentStateManagement:
         """Create a test scenario specification."""
         return ScenarioSpec(
             id="state_test",
-            title="State Management Test",
-            description="Testing state management functionality",
+            name="State Management Test",  # Fixed: was title, now name
+            seed=12345,  # Added required field
             state={
                 "location": "start_room",
                 "time": 0,
@@ -39,6 +39,23 @@ class TestAgentStateManagement:
                 {"id": "npc1", "type": "npc", "name": "Merchant"},
             ],
             actions=[],
+            random_events=[],  # Added required field
+            loss_conditions=[  # Added required field
+                {
+                    "id": "health_loss",
+                    "condition": {"<=": [{"var": "player_health"}, 0]},
+                    "message": "Player health depleted",
+                },
+                {
+                    "id": "time_loss",
+                    "condition": {">=": [{"var": "time"}, 1000]},
+                    "message": "Time limit exceeded",
+                },
+            ],
+            negativity_budget={  # Added required field
+                "min_fail_rate": 0.1,
+                "decay_per_turn": {"default": 0.05},
+            },
             rules=[],
         )
 
@@ -330,8 +347,8 @@ class TestStateManagementIntegration:
         """Create a comprehensive scenario for integration testing."""
         return ScenarioSpec(
             id="integration_test",
-            title="Integration Test Scenario",
-            description="Comprehensive scenario for integration testing",
+            name="Integration Test Scenario",  # Fixed: was title, now name
+            seed=12345,  # Added required field
             state={
                 "location": "tavern",
                 "time": 1200,
@@ -358,6 +375,23 @@ class TestStateManagementIntegration:
                 },
             ],
             actions=[],
+            random_events=[],  # Added required field
+            loss_conditions=[  # Added required field
+                {
+                    "id": "health_zero",
+                    "condition": {"<=": [{"var": "player.health"}, 0]},
+                    "message": "Player died",
+                },
+                {
+                    "id": "time_limit",
+                    "condition": {">=": [{"var": "time"}, 2400]},
+                    "message": "Day ended",
+                },
+            ],
+            negativity_budget={  # Added required field
+                "min_fail_rate": 0.15,
+                "decay_per_turn": {"default": 0.08},
+            },
             rules=[],
         )
 

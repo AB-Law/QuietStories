@@ -91,23 +91,44 @@ class TestLanggraphPerformance:
             orchestrator.memory.get_turn_count.return_value = 1
             orchestrator.graph = MagicMock()
 
-            # Add necessary methods for testing
+            # Add necessary methods for testing with dynamic behavior
             orchestrator._build_context = MagicMock(return_value={"test": "context"})
             orchestrator._get_memory_state_snapshot = MagicMock(
-                return_value={"snapshot": "data"}
-            )
-            orchestrator._should_continue = MagicMock(return_value="tools")
-            orchestrator._analyze_tool_usage = MagicMock(
-                return_value={"tool_count": 1, "effectiveness": "medium"}
-            )
-            orchestrator._summarize_conversation = MagicMock(
                 return_value={
-                    "total_messages": 1,
-                    "human_messages": 1,
-                    "effectiveness": "good",
+                    "turn_count": 1,
+                    "session_id": "perf_test_session",
+                    "snapshot": "data",
                 }
             )
-            orchestrator._analyze_errors = MagicMock(return_value={"error_count": 0})
+            orchestrator._should_continue = MagicMock(return_value="tools")
+
+            def mock_analyze_tool_usage(tool_messages, state):
+                return {"tool_count": len(tool_messages), "effectiveness": "medium"}
+
+            orchestrator._analyze_tool_usage = MagicMock(
+                side_effect=mock_analyze_tool_usage
+            )
+
+            def mock_summarize_conversation(messages):
+                human_count = sum(
+                    1
+                    for msg in messages
+                    if hasattr(msg, "type") and msg.type == "human"
+                )
+                return {
+                    "total_messages": len(messages),
+                    "human_messages": human_count,
+                    "effectiveness": "good",
+                }
+
+            orchestrator._summarize_conversation = MagicMock(
+                side_effect=mock_summarize_conversation
+            )
+
+            def mock_analyze_errors(error_messages):
+                return {"error_count": len(error_messages)}
+
+            orchestrator._analyze_errors = MagicMock(side_effect=mock_analyze_errors)
 
             return orchestrator
 
@@ -267,16 +288,17 @@ class TestLanggraphPerformance:
                 if i % 4 == 0:
                     messages.append(HumanMessage(content=f"User message {i}"))
                 elif i % 4 == 1:
-                    messages.append(
-                        AIMessage(
-                            content=f"AI response {i}",
-                            tool_calls=[
-                                {"name": f"tool_{i}", "args": {}, "id": f"call_{i}"}
-                            ]
-                            if i % 8 == 1
-                            else None,
+                    if i % 8 == 1:
+                        messages.append(
+                            AIMessage(
+                                content=f"AI response {i}",
+                                tool_calls=[
+                                    {"name": f"tool_{i}", "args": {}, "id": f"call_{i}"}
+                                ],
+                            )
                         )
-                    )
+                    else:
+                        messages.append(AIMessage(content=f"AI response {i}"))
                 elif i % 4 == 2:
                     messages.append(
                         ToolMessage(
@@ -294,7 +316,9 @@ class TestLanggraphPerformance:
 
             # Verify summary accuracy
             assert summary["total_messages"] == count
-            assert summary["human_messages"] == count // 4
+            # Count actual human messages (i % 4 == 0)
+            expected_human_count = len([i for i in range(count) if i % 4 == 0])
+            assert summary["human_messages"] == expected_human_count
 
         # Summarization should be efficient even for large conversations
         for i, time_taken in enumerate(times):

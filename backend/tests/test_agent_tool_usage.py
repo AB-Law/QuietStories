@@ -26,11 +26,28 @@ class TestLanggraphAgentToolUsage:
         """Create a mock scenario specification for testing."""
         return ScenarioSpec(
             id="test_scenario",
-            title="Test Scenario",
-            description="A test scenario for agent testing",
+            name="Test Scenario",  # Fixed: was title, now name
+            seed=12345,  # Added required field
             state={"location": "test_room", "time": 0},
             entities=[{"id": "player", "type": "player", "name": "Test Player"}],
             actions=[],
+            random_events=[],  # Added required field
+            loss_conditions=[  # Added required field
+                {
+                    "id": "test_loss",
+                    "condition": {"==": [{"var": "health"}, 0]},
+                    "message": "Test loss condition",
+                },
+                {
+                    "id": "test_loss2",
+                    "condition": {">=": [{"var": "time"}, 1000]},
+                    "message": "Time limit exceeded",
+                },
+            ],
+            negativity_budget={  # Added required field
+                "min_fail_rate": 0.1,
+                "decay_per_turn": {"default": 0.05},
+            },
             rules=[],
         )
 
@@ -226,7 +243,7 @@ class TestLanggraphAgentToolUsage:
 
         assert analysis["tool_count"] == 3
         assert analysis["success_rate"] == 2 / 3  # 2 successes out of 3
-        assert analysis["state_modifications"] == 1
+        assert analysis["state_modifications"] == 2  # Updated and read state operations
         assert analysis["effectiveness"] in ["medium", "high", "low"]
 
     def test_analyze_errors_categorization(self, orchestrator):
@@ -275,7 +292,10 @@ class TestLanggraphAgentToolUsage:
         messages = [
             SystemMessage(content="System prompt"),
             HumanMessage(content="User input"),
-            AIMessage(content="AI response", tool_calls=[{"name": "read_state"}]),
+            AIMessage(
+                content="AI response",
+                tool_calls=[{"name": "read_state", "args": {}, "id": "tool_call_1"}],
+            ),
             ToolMessage(content="Tool result", tool_call_id="1"),
             AIMessage(content="Final response"),
         ]
@@ -364,11 +384,28 @@ class TestAgentToolOrchestrationPerformance:
         """Create orchestrator for performance testing."""
         spec = ScenarioSpec(
             id="perf_test",
-            title="Performance Test",
-            description="Performance testing scenario",
+            name="Performance Test",  # Fixed: was title, now name
+            seed=12345,  # Added required field
             state={"test": True},
             entities=[],
             actions=[],
+            random_events=[],  # Added required field
+            loss_conditions=[  # Added required field
+                {
+                    "id": "perf_loss1",
+                    "condition": {"==": [{"var": "test"}, False]},
+                    "message": "Test failed",
+                },
+                {
+                    "id": "perf_loss2",
+                    "condition": {">=": [{"var": "time"}, 100]},
+                    "message": "Time exceeded",
+                },
+            ],
+            negativity_budget={  # Added required field
+                "min_fail_rate": 0.1,
+                "decay_per_turn": {"default": 0.05},
+            },
             rules=[],
         )
 
