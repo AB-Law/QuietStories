@@ -185,9 +185,9 @@ Pre-commit hooks automatically run code quality checks before each commit:
 - **Black**: Code formatting (88 character line length)
 - **isort**: Import sorting (compatible with Black)
 - **mypy**: Static type checking
-- **General**: Trailing whitespace, end-of-file fixes, YAML validation
+- **Frontend Build**: TypeScript compilation and Vite build check
 
-The hooks only check files in the `backend/` directory.
+The hooks check both `backend/` and `frontend/` directories as needed.
 
 #### Pre-push Checks
 
@@ -224,6 +224,8 @@ python -m isort --check-only backend
 # Frontend build
 cd frontend && npm run build
 ```
+
+All these checks are automatically run before each commit via pre-commit hooks.
 
 ### Key Concepts
 
@@ -317,3 +319,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Inspired by interactive fiction and AI storytelling
 - Thanks to the open-source community for amazing tools</content>
 <parameter name="filePath">/Users/akshayb/projects/QuietStories/README.md
+# Test comment
