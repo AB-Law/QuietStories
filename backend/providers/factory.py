@@ -3,16 +3,17 @@ Provider factory for creating LLM providers based on configuration
 """
 
 from typing import Union
-from .base import BaseProvider
-from .openai import OpenAIProvider
-from .ollama import OllamaProvider
-from .generic import GenericProvider
+
 from ..config import settings
+from .base import BaseProvider
+from .generic import GenericProvider
+from .ollama import OllamaProvider
+from .openai import OpenAIProvider
 
 
 def create_provider() -> BaseProvider:
     """Create a provider instance based on configuration"""
-    
+
     if settings.model_provider == "openai":
         return OpenAIProvider(
             api_base=settings.openai_api_base,

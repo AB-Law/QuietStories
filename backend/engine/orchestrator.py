@@ -8,18 +8,20 @@ This module coordinates the game loop, managing:
 - Turn history tracking
 """
 
-from typing import Dict, Any, List, Optional
 import json
-from langchain.schema import BaseMessage, SystemMessage, HumanMessage, AIMessage
+from typing import Any, Dict, List, Optional
+
+from langchain.schema import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.messages import ToolMessage
-from backend.providers import create_provider
-from backend.schemas import Outcome, ScenarioSpec
+
+from backend.db.manager import DatabaseManager
 from backend.engine.compiler import ScenarioCompiler
 from backend.engine.memory import MemoryManager
-from backend.utils.jsonlogic import JSONLogicEvaluator
 from backend.prompts import NARRATOR_SYSTEM, NARRATOR_USER
+from backend.providers import create_provider
+from backend.schemas import Outcome, ScenarioSpec
+from backend.utils.jsonlogic import JSONLogicEvaluator
 from backend.utils.logger import get_logger
-from backend.db.manager import DatabaseManager
 
 logger = get_logger(__name__)
 
@@ -27,11 +29,11 @@ logger = get_logger(__name__)
 class TurnOrchestrator:
     """
     Orchestrates turn-based gameplay with LLM integration.
-    
+
     This class manages the game loop, building context from game state,
     turn history, and memory to generate coherent narratives. It implements
     smart context selection to keep LLM prompts focused and efficient.
-    
+
     Attributes:
         spec: The scenario specification defining the game rules
         session_id: Unique identifier for this game session
@@ -41,11 +43,11 @@ class TurnOrchestrator:
         tools: Compiled scenario actions (not used for narrator)
         _session_ref: Reference to fetch turn history
     """
-    
+
     def __init__(self, spec: ScenarioSpec, session_id: str, db_manager=None):
         """
         Initialize the turn orchestrator.
-        
+
         Args:
             spec: Scenario specification defining game rules
             session_id: Unique session identifier
@@ -56,8 +58,8 @@ class TurnOrchestrator:
         self.db_manager = db_manager
         self.provider = create_provider()
         self.compiler = ScenarioCompiler(spec)
-        self.compiler._orchestrator = self  # Give compiler access to orchestrator
-        
+        self.compiler._orchestrator = self  # type: ignore # Give compiler access to orchestrator
+
         # Load memory from database if available
         private_memory = {}
         public_memory = {}
@@ -65,76 +67,84 @@ class TurnOrchestrator:
         if db_manager:
             session_data = db_manager.get_session(session_id)
             if session_data:
-                private_memory = session_data.get('private_memory', {})
-                public_memory = session_data.get('public_memory', {})
-                turn_count = session_data.get('turn', 0)
-        
-        self.memory = MemoryManager(session_id, db_manager, private_memory, public_memory, turn_count)
+                private_memory = session_data.get("private_memory", {})
+                public_memory = session_data.get("public_memory", {})
+                turn_count = session_data.get("turn", 0)
+
+        self.memory = MemoryManager(
+            session_id, db_manager, private_memory, public_memory, turn_count
+        )
         self.tools = self.compiler.get_tools()
-        self._session_ref = None  # Will be set to access session data
-    
+        self._session_ref: Optional[
+            Dict[str, Any]
+        ] = None  # Will be set to access session data
+
     def set_session_ref(self, session_ref: Dict[str, Any]):
         """
         Set reference to session data for accessing turn history.
-        
+
         Args:
             session_ref: Dictionary containing session data including turn_history
         """
         self._session_ref = session_ref
-    
-    async def process_turn(self, user_input: str = None) -> Outcome:
+
+    async def process_turn(self, user_input: Optional[str] = None) -> Outcome:
         """
         Process a single turn of gameplay with multi-turn tool calling.
-        
+
         This method implements an agentic loop where the LLM can:
         1. Call tools to read/update state, create characters, etc.
         2. Receive tool results and continue reasoning
         3. Finally provide the narrative outcome
-        
+
         Args:
             user_input: Optional player action description
-        
+
         Returns:
             Outcome object containing narrative and state changes
-        
+
         Raises:
             Exception: If LLM call fails and fallback also fails
         """
-        logger.info(f"[Orchestrator] Processing turn {self.memory.get_turn_count() + 1} with agentic tool calling")
-        
+        logger.info(
+            f"[Orchestrator] Processing turn {self.memory.get_turn_count() + 1} with agentic tool calling"
+        )
+
         # Build context for the LLM
         context = self._build_context()
-        
+
         # Create initial messages
         messages = [
             SystemMessage(content=self._get_system_prompt()),
-            HumanMessage(content=self._get_user_prompt(context, user_input))
+            HumanMessage(content=self._get_user_prompt(context, user_input)),
         ]
-        
+
         max_rounds = 5  # Prevent infinite loops
         round_num = 0
-        
-        logger.info(f"[Orchestrator] 🎯 Starting agentic tool calling loop (max {max_rounds} rounds)")
+
+        logger.info(
+            f"[Orchestrator] 🎯 Starting agentic tool calling loop (max {max_rounds} rounds)"
+        )
         logger.info(f"[Orchestrator] 🔨 Available tools: {[t.name for t in self.tools]}")
-        
+
         while round_num < max_rounds:
             round_num += 1
             logger.info(f"[Orchestrator] 🔄 === Round {round_num}/{max_rounds} ===")
-            
+
             # Call LLM with current messages and tools
-            response = await self.provider.chat(
-                messages=messages,
-                tools=self.tools
+            response = await self.provider.chat(messages=messages, tools=self.tools)
+
+            logger.debug(
+                f"[Orchestrator] Response content preview: {(response.content or '')[:100]}..."
             )
-            
-            logger.debug(f"[Orchestrator] Response content preview: {(response.content or '')[:100]}...")
             logger.debug(f"[Orchestrator] Has tool calls: {bool(response.tool_calls)}")
-            
+
             # Add assistant message to conversation
             # Format tool_calls for LangChain AIMessage
             formatted_tool_calls = []
             if response.tool_calls:
                 import json
+
                 for tc in response.tool_calls:
                     raw_args = tc.get("function", {}).get("arguments", {})
                     # Parse args if they're a string
@@ -145,147 +155,186 @@ class TurnOrchestrator:
                             parsed_args = {}
                     else:
                         parsed_args = raw_args
-                    
-                    formatted_tool_calls.append({
-                        "name": tc.get("function", {}).get("name"),
-                        "args": parsed_args,
-                        "id": tc.get("id"),
-                        "type": tc.get("type", "function")
-                    })
-            
+
+                    formatted_tool_calls.append(
+                        {
+                            "name": tc.get("function", {}).get("name"),
+                            "args": parsed_args,
+                            "id": tc.get("id"),
+                            "type": tc.get("type", "function"),
+                        }
+                    )
+
             # Create AIMessage - only include tool_calls if they exist
             if formatted_tool_calls:
                 assistant_message = AIMessage(
-                    content=response.content or "",
-                    tool_calls=formatted_tool_calls
+                    content=response.content or "", tool_calls=formatted_tool_calls
                 )
             else:
-                assistant_message = AIMessage(
-                    content=response.content or ""
-                )
+                assistant_message = AIMessage(content=response.content or "")
             messages.append(assistant_message)
-            
+
             # Check if LLM wants to call tools
             if response.tool_calls:
-                logger.info(f"[Orchestrator] 🔧 LLM called {len(response.tool_calls)} tools in round {round_num}")
-                
+                logger.info(
+                    f"[Orchestrator] 🔧 LLM called {len(response.tool_calls)} tools in round {round_num}"
+                )
+
                 # Execute each tool call
                 for idx, tool_call in enumerate(response.tool_calls, 1):
                     tool_name = tool_call.get("function", {}).get("name")
                     tool_args = tool_call.get("function", {}).get("arguments", {})
                     tool_call_id = tool_call.get("id")
-                    
-                    logger.info(f"[Orchestrator] 🔧 Tool {idx}/{len(response.tool_calls)}: {tool_name}")
+
+                    logger.info(
+                        f"[Orchestrator] 🔧 Tool {idx}/{len(response.tool_calls)}: {tool_name}"
+                    )
                     logger.info(f"[Orchestrator]    Raw args: {tool_args}")
-                    
+
                     try:
                         # Parse tool arguments if they're a JSON string
                         if isinstance(tool_args, str):
                             import json
+
                             try:
                                 args = json.loads(tool_args) if tool_args else {}
                             except json.JSONDecodeError:
-                                logger.error(f"[Orchestrator] ✗ Failed to parse tool args as JSON: {tool_args}")
+                                logger.error(
+                                    f"[Orchestrator] ✗ Failed to parse tool args as JSON: {tool_args}"
+                                )
                                 args = {}
                         elif isinstance(tool_args, dict):
                             args = tool_args
                         else:
-                            logger.warning(f"[Orchestrator] ⚠ Unexpected tool_args type: {type(tool_args)}")
+                            logger.warning(
+                                f"[Orchestrator] ⚠ Unexpected tool_args type: {type(tool_args)}"
+                            )
                             args = {}
-                        
+
                         logger.info(f"[Orchestrator]    Parsed args: {args}")
-                        
+
                         # Find and execute the tool
                         tool_result = await self._execute_tool(tool_name, args)
-                        
+
                         # Add tool result to messages
                         tool_message = ToolMessage(
-                            content=str(tool_result),
-                            tool_call_id=tool_call_id
+                            content=str(tool_result), tool_call_id=tool_call_id
                         )
                         messages.append(tool_message)
-                        
-                        logger.info(f"[Orchestrator] ✓ Tool {tool_name} result: {tool_result}")
-                        
+
+                        logger.info(
+                            f"[Orchestrator] ✓ Tool {tool_name} result: {tool_result}"
+                        )
+
                     except Exception as e:
-                        logger.error(f"[Orchestrator] ✗ Tool {tool_name} execution failed: {e}")
+                        logger.error(
+                            f"[Orchestrator] ✗ Tool {tool_name} execution failed: {e}"
+                        )
                         # Add error result to messages
                         tool_message = ToolMessage(
                             content=f"Error executing tool {tool_name}: {e}",
-                            tool_call_id=tool_call_id
+                            tool_call_id=tool_call_id,
                         )
                         messages.append(tool_message)
-                
+
                 # Continue to next round since tools were called
-                logger.info(f"[Orchestrator] 🔄 Continuing to next round with tool results...")
+                logger.info(
+                    f"[Orchestrator] 🔄 Continuing to next round with tool results..."
+                )
                 continue
             else:
                 # LLM is done with tools, break to get final narrative
-                logger.info(f"[Orchestrator] ✅ LLM finished tool calls after {round_num} rounds")
+                logger.info(
+                    f"[Orchestrator] ✅ LLM finished tool calls after {round_num} rounds"
+                )
                 break
-        
+
         # Check if we hit max rounds
         if round_num >= max_rounds:
-            logger.warning(f"[Orchestrator] ⚠ Hit maximum rounds ({max_rounds}), forcing final narrative")
-        
+            logger.warning(
+                f"[Orchestrator] ⚠ Hit maximum rounds ({max_rounds}), forcing final narrative"
+            )
+
         # Now get the final narrative with structured output
-        logger.info("[Orchestrator] 📖 Requesting final structured narrative outcome from LLM")
-        messages.append(HumanMessage(content="Now provide the final narrative outcome as structured JSON with the Outcome schema."))
-        
-        final_response = await self.provider.chat(
-            messages=messages,
-            json_schema=self._get_outcome_schema()
+        logger.info(
+            "[Orchestrator] 📖 Requesting final structured narrative outcome from LLM"
         )
-        
-        if not final_response.content or final_response.content.strip() == '':
+        messages.append(
+            HumanMessage(
+                content="Now provide the final narrative outcome as structured JSON with the Outcome schema."
+            )
+        )
+
+        final_response = await self.provider.chat(
+            messages=messages, json_schema=self._get_outcome_schema()
+        )
+
+        if not final_response.content or final_response.content.strip() == "":
             logger.error("[Orchestrator] ✗ Empty final content from provider!")
             # Fallback to minimal outcome
-            outcome = Outcome(
+            return Outcome(
                 narrative="The story continues...",
-                state_changes=[]
+                state_changes=[],
+                visible_dialogue=None,
+                roll_requests=None,
+                hidden_memory_updates=None,
             )
         else:
             # Parse and validate outcome
-            logger.debug(f"[Orchestrator] Final content preview: {final_response.content[:300]}")
+            logger.debug(
+                f"[Orchestrator] Final content preview: {final_response.content[:300]}"
+            )
             outcome = self._parse_outcome(final_response.content)
-        
+
         # Log outcome summary
-        logger.info(f"[Orchestrator] 📖 Narrative length: {len(outcome.narrative)} chars")
+        logger.info(
+            f"[Orchestrator] 📖 Narrative length: {len(outcome.narrative)} chars"
+        )
         logger.info(f"[Orchestrator] 🔄 State changes: {len(outcome.state_changes)}")
         if outcome.hidden_memory_updates:
-            logger.info(f"[Orchestrator] 🧠 Memory updates: {len(outcome.hidden_memory_updates)}")
-        
+            logger.info(
+                f"[Orchestrator] 🧠 Memory updates: {len(outcome.hidden_memory_updates)}"
+            )
+
         # Apply state changes
         if outcome.state_changes:
-            logger.info(f"[Orchestrator] Applying {len(outcome.state_changes)} state changes...")
+            logger.info(
+                f"[Orchestrator] Applying {len(outcome.state_changes)} state changes..."
+            )
             for i, change in enumerate(outcome.state_changes, 1):
-                logger.debug(f"[Orchestrator]   {i}. {change.op} {change.path} = {str(change.value)[:50]}")
+                logger.debug(
+                    f"[Orchestrator]   {i}. {change.op} {change.path} = {str(change.value)[:50]}"
+                )
         self._apply_state_changes(outcome.state_changes)
-        
+
         # Update memory - but skip if LLM already used add_memory tool
         # (to avoid duplicates from both tool calls and hidden_memory_updates)
         if outcome.hidden_memory_updates:
-            logger.info(f"[Orchestrator] 🧠 Skipping hidden_memory_updates (memories already saved via tools)")
-            logger.debug(f"[Orchestrator] Note: LLM should use add_memory tool during thinking, not hidden_memory_updates in outcome")
+            logger.info(
+                f"[Orchestrator] 🧠 Skipping hidden_memory_updates (memories already saved via tools)"
+            )
+            logger.debug(
+                f"[Orchestrator] Note: LLM should use add_memory tool during thinking, not hidden_memory_updates in outcome"
+            )
             # self._update_memory(outcome.hidden_memory_updates)  # Disabled to prevent duplicates
-        
+
         # Increment turn counter
         self.memory.increment_turn()
         logger.info(f"[Orchestrator] ✅ Turn completed: {self.memory.get_turn_count()}")
-        
+
         # Save memory to database
         self.memory.save_to_database()
-        
+
         return outcome
-    
+
     def _build_context(self) -> Dict[str, Any]:
         """
         Build comprehensive context for the LLM narrator.
-        
+
         This method assembles all relevant information for generating
         the next turn's narrative, using smart context selection to
         keep prompts focused and efficient.
-        
+
         Returns:
             Dictionary containing:
                 - state: Current game state
@@ -297,7 +346,7 @@ class TurnOrchestrator:
                 - turn: Current turn number
                 - available_actions: Actions available to player
                 - world_background: World setting (if available)
-        
+
         Note:
             Context selection prioritizes recent information and
             summarizes older content to fit within LLM context limits.
@@ -306,16 +355,16 @@ class TurnOrchestrator:
         pov_entity = self._get_pov_entity()
         private_memory = self.memory.get_private_memory(pov_entity)
         public_memory = self.memory.get_public_memory()
-        
+
         # Get turn history for context
         recent_turns = self._get_recent_turns(3)  # Last 3 turns verbatim
         history_summary = self._get_history_summary()  # Summarized older turns
-        
+
         # Get world background if available
         world_background = None
-        if self._session_ref and 'world_background' in self._session_ref:
-            world_background = self._session_ref['world_background']
-        
+        if self._session_ref and "world_background" in self._session_ref:
+            world_background = self._session_ref["world_background"]
+
         return {
             "state": self.spec.state,
             "entities": self.spec.entities,
@@ -325,58 +374,64 @@ class TurnOrchestrator:
             "public_memory": public_memory,
             "turn": self.memory.get_turn_count(),
             "available_actions": self._get_available_actions(),
-            "world_background": world_background
+            "world_background": world_background,
         }
-    
+
     def _get_system_prompt(self) -> str:
         """Get system prompt for the narrator"""
         return NARRATOR_SYSTEM
-    
-    def _get_user_prompt(self, context: Dict[str, Any], user_input: str = None) -> str:
+
+    def _get_user_prompt(
+        self, context: Dict[str, Any], user_input: Optional[str] = None
+    ) -> str:
         """
         Generate user prompt with full context for narrator.
-        
+
         Args:
             context: Context dictionary from _build_context()
             user_input: Optional player action description
-        
+
         Returns:
             Formatted prompt string with all relevant context
-        
+
         Note:
             This method formats context into a narrative-friendly structure,
             prioritizing recent events and current state information.
         """
-        state_summary = json.dumps(context['state'], indent=2)
-        
+        state_summary = json.dumps(context["state"], indent=2)
+
         # Format recent turns
         recent_turns_text = ""
-        if context.get('recent_turns'):
+        if context.get("recent_turns"):
             turns_list = []
-            for turn in context['recent_turns']:
-                turns_list.append(f"Turn {turn['turn']}: {turn.get('user_action', 'Continue')}")
+            for turn in context["recent_turns"]:
+                turns_list.append(
+                    f"Turn {turn['turn']}: {turn.get('user_action', 'Continue')}"
+                )
                 turns_list.append(f"  Narrative: {turn['narrative'][:200]}...")
             recent_turns_text = "\n".join(turns_list)
         else:
             recent_turns_text = "No previous turns"
-        
+
         # Format history summary
-        history_text = context.get('history_summary', "This is the beginning of the story")
-        
+        history_text = context.get(
+            "history_summary", "This is the beginning of the story"
+        )
+
         # Format entities
         entities_text = ""
-        if context.get('entities'):
+        if context.get("entities"):
             entities_list = [
                 f"- {e.get('id', 'unknown')}: {e.get('type', 'entity')}"
-                for e in context['entities'][:10]
+                for e in context["entities"][:10]
             ]
             entities_text = "\n".join(entities_list)
         else:
             entities_text = "No entities yet"
-        
+
         # Format world background
-        world_text = context.get('world_background', "No world background available")
-        
+        world_text = context.get("world_background", "No world background available")
+
         # Build complete prompt
         return NARRATOR_USER.format(
             state_summary=state_summary,
@@ -384,147 +439,154 @@ class TurnOrchestrator:
             recent_turns=recent_turns_text,
             history_summary=history_text,
             entities_summary=entities_text,
-            action=user_input or "Continue the story"
+            action=user_input or "Continue the story",
         )
-    
+
     def _get_outcome_schema(self) -> Dict[str, Any]:
         """
         Get JSON schema for outcome validation.
-        
+
         Returns:
             JSON schema generated from Pydantic Outcome model
         """
         # Use Pydantic's generated schema for accuracy
         return Outcome.model_json_schema()
-    
+
     def _get_recent_turns(self, n: int = 3) -> List[Dict[str, Any]]:
         """
         Fetch the last N turns from session history.
-        
+
         Args:
             n: Number of recent turns to retrieve (default: 3)
-        
+
         Returns:
             List of turn records, most recent last. Empty list if no history.
-        
+
         Note:
             This method fetches from the session stored in _session_ref.
             If _session_ref is not set, returns empty list.
         """
-        if not self._session_ref or 'turn_history' not in self._session_ref:
+        if not self._session_ref or "turn_history" not in self._session_ref:
             return []
-        
-        turn_history = self._session_ref.get('turn_history', [])
+
+        turn_history = self._session_ref.get("turn_history", [])
         if not turn_history:
             return []
-        
+
         # Return last N turns
         recent = turn_history[-n:] if len(turn_history) >= n else turn_history
         logger.debug(f"Retrieved {len(recent)} recent turns")
         return recent
-    
+
     def _get_history_summary(self) -> str:
         """
         Get a summary of older turns (beyond the recent 3).
-        
+
         Returns:
             A summary string of historical events, or empty string if not enough history
-        
+
         Note:
             This method summarizes turns in batches of 5 to keep context manageable.
             Only summarizes turns older than the last 3 (handled by _get_recent_turns).
         """
-        if not self._session_ref or 'turn_history' not in self._session_ref:
+        if not self._session_ref or "turn_history" not in self._session_ref:
             return ""
-        
-        turn_history = self._session_ref.get('turn_history', [])
-        
+
+        turn_history = self._session_ref.get("turn_history", [])
+
         # Only summarize if we have more than 3 turns
         if len(turn_history) <= 3:
             return ""
-        
+
         # Get turns to summarize (all except last 3)
         older_turns = turn_history[:-3]
-        
+
         if not older_turns:
             return ""
-        
+
         # Simple summarization: extract key events every 5 turns
         summary_points = []
         for i in range(0, len(older_turns), 5):
-            batch = older_turns[i:i+5]
+            batch = older_turns[i : i + 5]
             # Extract narrative highlights from batch
             highlights = [
                 f"Turn {turn['turn']}: {turn.get('user_action', 'continued')}"
                 for turn in batch[:2]  # Just first 2 of each batch
             ]
             summary_points.extend(highlights)
-        
+
         if summary_points:
-            summary = "Earlier events: " + "; ".join(summary_points[:10])  # Limit to 10 points
+            summary = "Earlier events: " + "; ".join(
+                summary_points[:10]
+            )  # Limit to 10 points
             logger.debug(f"Generated history summary with {len(summary_points)} points")
             return summary
-        
+
         return ""
-    
+
     async def _summarize_turns(self, turns: List[Dict[str, Any]]) -> str:
         """
         Use LLM to summarize a batch of turns.
-        
+
         Args:
             turns: List of turn records to summarize
-        
+
         Returns:
             A concise summary paragraph
-        
+
         Note:
             This method is currently not used (simple summarization in _get_history_summary
             is sufficient). Can be activated for more sophisticated summarization if needed.
         """
         if not turns:
             return ""
-        
+
         # Build summary request
         turns_text = []
         for turn in turns:
-            turns_text.append(f"Turn {turn['turn']}: {turn.get('user_action', 'Continue')}")
+            turns_text.append(
+                f"Turn {turn['turn']}: {turn.get('user_action', 'Continue')}"
+            )
             turns_text.append(f"Result: {turn['narrative'][:150]}...")
-        
+
         prompt = f"""Summarize these game turns into 2-3 concise sentences capturing key events:
 
 {chr(10).join(turns_text)}
 
 Summary:"""
-        
+
         messages = [
-            SystemMessage(content="You are a concise summarizer. Create brief event summaries."),
-            HumanMessage(content=prompt)
+            SystemMessage(
+                content="You are a concise summarizer. Create brief event summaries."
+            ),
+            HumanMessage(content=prompt),
         ]
-        
+
         try:
             response = await self.provider.chat(messages)
             return response.content.strip()
         except Exception as e:
             logger.error(f"Turn summarization failed: {e}")
             return f"Events during turns {turns[0]['turn']}-{turns[-1]['turn']}"
-    
+
     def _parse_outcome(self, content: str) -> Outcome:
         """Parse and validate outcome from LLM response"""
-        
+
         import json
-        import re
         import logging
+        import re
+
         logger = logging.getLogger(__name__)
-        
+
         try:
             # Clean up content - remove double curly braces if present
             content = content.strip()
-            
+
             # Fix double curly braces ({{ -> {, }} -> })
-            if content.startswith('{{') and content.endswith('}}'):
+            if content.startswith("{{") and content.endswith("}}"):
                 logger.debug("Removing double curly braces from content")
                 content = content[1:-1]  # Remove first and last character
-            
+
             # Try to parse JSON directly
             outcome_data = json.loads(content)
             logger.debug(f"Successfully parsed outcome: {list(outcome_data.keys())}")
@@ -533,7 +595,7 @@ Summary:"""
             logger.warning(f"JSON parsing error: {e}")
             logger.debug(f"Content preview: {content[:200]}")
             # Try to extract JSON from response
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            json_match = re.search(r"\{.*\}", content, re.DOTALL)
             if json_match:
                 try:
                     json_str = json_match.group()
@@ -546,23 +608,29 @@ Summary:"""
             logger.warning("Falling back to minimal outcome")
             return Outcome(
                 narrative="The story continues...",
-                state_changes=[]
+                state_changes=[],
+                visible_dialogue=None,
+                roll_requests=None,
+                hidden_memory_updates=None,
             )
         except Exception as e:
             logger.error(f"Outcome parsing error: {e}", exc_info=True)
             # Fallback to minimal outcome
             return Outcome(
                 narrative="The story continues...",
-                state_changes=[]
+                state_changes=[],
+                visible_dialogue=None,
+                roll_requests=None,
+                hidden_memory_updates=None,
             )
-    
+
     def _apply_state_changes(self, state_changes: List[Any]):
         """
         Apply state changes to the scenario state.
-        
+
         Args:
             state_changes: List of StateChange objects or dicts
-        
+
         Note:
             Handles both Pydantic StateChange objects and plain dicts
             for flexibility. Updates self.spec.state in place.
@@ -570,19 +638,19 @@ Summary:"""
         for change in state_changes:
             try:
                 evaluator = JSONLogicEvaluator()
-                
+
                 # Handle both StateChange objects and dicts
-                if hasattr(change, 'op'):
+                if hasattr(change, "op"):
                     # Pydantic object
                     op = change.op
-                    path = change.path if hasattr(change, 'path') else ""
-                    value = change.value if hasattr(change, 'value') else None
+                    path = change.path if hasattr(change, "path") else ""
+                    value = change.value if hasattr(change, "value") else None
                 else:
                     # Dict
                     op = change.get("op")
                     path = change.get("path", "")
                     value = change.get("value")
-                
+
                 if op == "set":
                     self._set_value_at_path(path, value)
                 elif op == "inc":
@@ -604,13 +672,17 @@ Summary:"""
                     if isinstance(current_value, list):
                         current_value.append(value)
                         self._set_value_at_path(path, current_value)
-                        
+
                         # Detect entity creation
                         if "entities" in path or "entity" in path:
-                            entity_id = value.get('id', 'unknown') if isinstance(value, dict) else 'unknown'
+                            entity_id = (
+                                value.get("id", "unknown")
+                                if isinstance(value, dict)
+                                else "unknown"
+                            )
                             logger.info(f"New entity created: {entity_id}")
                             # Also update spec.entities if it's the main entities list
-                            if path.endswith('entities') and isinstance(value, dict):
+                            if path.endswith("entities") and isinstance(value, dict):
                                 self.spec.entities.append(value)
                 elif op == "pop":
                     current_value = self._get_value_at_path(path)
@@ -626,20 +698,20 @@ Summary:"""
                         self._set_value_at_path(log_path, current_log)
                     else:
                         self._set_value_at_path(log_path, [value])
-                        
+
             except Exception as e:
                 # Log error but continue with other changes
                 print(f"Error applying state change {change}: {e}")
-    
+
     def _get_value_at_path(self, path: str) -> Any:
         """Get value at JSON pointer path"""
         if not path or path == "":
             return self.spec.state
-        
+
         # Simple path resolution - in production, use proper JSON pointer library
         parts = path.split(".")
-        current = self.spec.state
-        
+        current: Any = self.spec.state
+
         for part in parts:
             if part.startswith("[") and part.endswith("]"):
                 # Array access
@@ -647,19 +719,19 @@ Summary:"""
                 current = current[index]
             else:
                 current = current.get(part, {})
-        
+
         return current
-    
+
     def _set_value_at_path(self, path: str, value: Any):
         """Set value at JSON pointer path"""
         if not path or path == "":
             self.spec.state = value
             return
-        
+
         # Simple path resolution - in production, use proper JSON pointer library
         parts = path.split(".")
-        current = self.spec.state
-        
+        current: Any = self.spec.state
+
         for i, part in enumerate(parts[:-1]):
             if part.startswith("[") and part.endswith("]"):
                 # Array access
@@ -669,7 +741,7 @@ Summary:"""
                 if part not in current:
                     current[part] = {}
                 current = current[part]
-        
+
         # Set the final value
         final_part = parts[-1]
         if final_part.startswith("[") and final_part.endswith("]"):
@@ -677,14 +749,14 @@ Summary:"""
             current[index] = value
         else:
             current[final_part] = value
-    
+
     def _update_memory(self, memory_updates: List[Any]):
         """
         Update entity memories from hidden memory updates.
-        
+
         Args:
             memory_updates: List of memory update objects or dicts from Outcome
-        
+
         Note:
             Processes hidden_memory_updates from the narrator's Outcome,
             routing them to private or public memory based on visibility.
@@ -692,23 +764,23 @@ Summary:"""
         """
         for update in memory_updates:
             # Handle both Pydantic objects and dicts
-            if hasattr(update, 'target_id'):
+            if hasattr(update, "target_id"):
                 # Pydantic object
                 target_id = update.target_id
                 content = update.content
-                scope = getattr(update, 'scope', 'general')
-                visibility = getattr(update, 'visibility', 'private')
+                scope = getattr(update, "scope", "general")
+                visibility = getattr(update, "visibility", "private")
             else:
                 # Dict
                 target_id = update.get("target_id")
                 content = update.get("content")
                 scope = update.get("scope", "general")
                 visibility = update.get("visibility", "private")
-            
+
             if not target_id or not content:
                 logger.warning(f"Skipping invalid memory update: {update}")
                 continue
-            
+
             # Route to appropriate memory based on visibility
             if visibility == "private":
                 self.memory.update_private_memory(target_id, content, scope)
@@ -717,95 +789,97 @@ Summary:"""
                 self.memory.update_public_memory(target_id, content)
                 logger.debug(f"Updated public memory for {target_id}")
             else:
-                logger.warning(f"Unknown visibility '{visibility}', treating as private")
+                logger.warning(
+                    f"Unknown visibility '{visibility}', treating as private"
+                )
                 self.memory.update_private_memory(target_id, content, scope)
-    
+
     def _get_pov_entity(self) -> str:
         """
         Get the point-of-view entity ID for the current session.
-        
+
         Returns:
             Entity ID string (currently defaults to "player")
-        
+
         Note:
             Current implementation is simplified. In production, this could:
             - Read from session state
             - Support multiple player entities
             - Handle entity switching mid-game
             - Detect from entity list
-        
+
         TODO: Implement proper POV detection from session/state
         """
         # Check if there's a POV marker in state
-        if hasattr(self.spec, 'state') and isinstance(self.spec.state, dict):
-            pov = self.spec.state.get('pov_entity')
+        if hasattr(self.spec, "state") and isinstance(self.spec.state, dict):
+            pov = self.spec.state.get("pov_entity")
             if pov:
                 return pov
-        
+
         # Check if there's a player entity in entities list
         if self.spec.entities:
             for entity in self.spec.entities:
-                if entity.get('type') == 'player' or entity.get('id') == 'player':
-                    return entity.get('id', 'player')
-        
+                if entity.get("type") == "player" or entity.get("id") == "player":
+                    return entity.get("id", "player")
+
         # Default to "player"
         return "player"
-    
+
     def _get_available_actions(self) -> List[str]:
         """
         Get list of available action IDs for the current state.
-        
+
         Returns:
             List of action ID strings
-        
+
         Note:
             Current implementation returns all actions. In production,
             this should filter by:
             - Preconditions against current state
             - Location/context restrictions
             - Entity capabilities
-        
+
         TODO: Implement precondition checking
         """
         # TODO: Filter actions by preconditions
         # For now, return all action IDs
         action_ids = [action.id for action in self.spec.actions]
-        
+
         # Future: check preconditions
         # available = []
         # for action in self.spec.actions:
         #     if self._check_preconditions(action.preconditions, self.spec.state):
         #         available.append(action.id)
         # return available
-        
+
         return action_ids
-    
+
     async def _execute_tool(self, tool_name: str, args: Dict[str, Any]) -> str:
         """
         Execute a tool by name with given arguments.
-        
+
         Args:
             tool_name: Name of the tool to execute
             args: Arguments to pass to the tool
-        
+
         Returns:
             String result of tool execution
-        
+
         Raises:
             ValueError: If tool name is not recognized
         """
         logger.debug(f"[Orchestrator] Executing tool {tool_name} with args: {args}")
-        
+
         # Find the tool by name
         tool = None
         for t in self.tools:
             if t.name == tool_name:
                 tool = t
                 break
-        
+
         if not tool:
             raise ValueError(f"Unknown tool: {tool_name}")
-        
+
         try:
             # Execute the tool directly by calling _arun with unpacked arguments
             result = await tool._arun(**args)

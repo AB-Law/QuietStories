@@ -174,6 +174,57 @@ QuietStories/
 └── data/                   # SQLite database
 ```
 
+### Development Workflow
+
+This project uses automated code quality checks to ensure consistent code standards:
+
+#### Pre-commit Hooks
+
+Pre-commit hooks automatically run code quality checks before each commit:
+
+- **Black**: Code formatting (88 character line length)
+- **isort**: Import sorting (compatible with Black)
+- **mypy**: Static type checking
+- **General**: Trailing whitespace, end-of-file fixes, YAML validation
+
+The hooks only check files in the `backend/` directory.
+
+#### Pre-push Checks
+
+Before pushing code, the following build checks are performed:
+
+- **Backend**: mypy type checking, Black formatting validation, isort import validation
+- **Frontend**: TypeScript compilation and Vite build
+
+If any checks fail, the push is blocked until issues are resolved.
+
+#### Setup
+
+After cloning the repository:
+
+```bash
+# Install pre-commit hooks
+pip install pre-commit
+pre-commit install
+
+# The hooks will now run automatically on commit
+# Pre-push checks run automatically on push
+```
+
+#### Manual Checks
+
+You can also run checks manually:
+
+```bash
+# Backend checks
+python -m mypy backend --ignore-missing-imports
+python -m black --check backend
+python -m isort --check-only backend
+
+# Frontend build
+cd frontend && npm run build
+```
+
 ### Key Concepts
 
 - **ScenarioSpec**: JSON structure defining scenario rules, actions, and events

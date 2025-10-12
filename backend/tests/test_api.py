@@ -4,10 +4,12 @@ API integration tests for the FastAPI backend.
 Tests the main endpoints and routers using FastAPI TestClient.
 """
 
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock, AsyncMock
-import json
+
 from backend.main import app
 
 client = TestClient(app)
@@ -37,7 +39,7 @@ class TestRootEndpoints:
 class TestScenariosAPI:
     """Test scenarios API endpoints"""
 
-    @patch('backend.api.scenarios.db')
+    @patch("backend.api.scenarios.db")
     def test_list_scenarios_empty(self, mock_db):
         """Test listing scenarios when none exist"""
         mock_db.list_scenarios.return_value = []
@@ -48,12 +50,12 @@ class TestScenariosAPI:
         assert "scenarios" in data
         assert data["scenarios"] == []
 
-    @patch('backend.api.scenarios.db')
+    @patch("backend.api.scenarios.db")
     def test_list_scenarios_with_data(self, mock_db):
         """Test listing scenarios with mock data"""
         mock_scenarios = [
             {"id": "test-1", "name": "Test Scenario 1", "status": "generated"},
-            {"id": "test-2", "name": "Test Scenario 2", "status": "compiled"}
+            {"id": "test-2", "name": "Test Scenario 2", "status": "compiled"},
         ]
         mock_db.list_scenarios.return_value = mock_scenarios
 
@@ -63,7 +65,7 @@ class TestScenariosAPI:
         assert len(data["scenarios"]) == 2
         assert data["scenarios"][0]["name"] == "Test Scenario 1"
 
-    @patch('backend.api.scenarios.db')
+    @patch("backend.api.scenarios.db")
     def test_get_scenario_not_found(self, mock_db):
         """Test getting a non-existent scenario"""
         mock_db.get_scenario.return_value = None
@@ -74,14 +76,14 @@ class TestScenariosAPI:
         assert "detail" in data
         assert "not found" in data["detail"].lower()
 
-    @patch('backend.api.scenarios.db')
+    @patch("backend.api.scenarios.db")
     def test_get_scenario_success(self, mock_db):
         """Test getting an existing scenario"""
         mock_scenario = {
             "id": "test-id",
             "name": "Test Scenario",
             "spec": {"name": "Test", "actions": []},
-            "status": "generated"
+            "status": "generated",
         }
         mock_db.get_scenario.return_value = mock_scenario
 
@@ -91,8 +93,8 @@ class TestScenariosAPI:
         assert data["id"] == "test-id"
         assert data["name"] == "Test Scenario"
 
-    @patch('backend.api.scenarios.ScenarioGenerator')
-    @patch('backend.api.scenarios.db')
+    @patch("backend.api.scenarios.ScenarioGenerator")
+    @patch("backend.api.scenarios.db")
     def test_generate_scenario_success(self, mock_db, mock_generator_class):
         """Test successful scenario generation"""
         # Mock the generator
@@ -100,7 +102,10 @@ class TestScenariosAPI:
         mock_scenario_spec = MagicMock()
         mock_scenario_spec.name = "Generated Scenario"
         mock_scenario_spec.spec_version = "1.0"
-        mock_scenario_spec.dict.return_value = {"name": "Generated Scenario", "actions": []}
+        mock_scenario_spec.dict.return_value = {
+            "name": "Generated Scenario",
+            "actions": [],
+        }
         # Use AsyncMock for async method
         mock_generator.generate_scenario = AsyncMock(return_value=mock_scenario_spec)
         mock_generator_class.return_value = mock_generator
@@ -117,12 +122,14 @@ class TestScenariosAPI:
         assert data["name"] == "Generated Scenario"
         assert data["status"] == "generated"
 
-    @patch('backend.api.scenarios.ScenarioGenerator')
+    @patch("backend.api.scenarios.ScenarioGenerator")
     def test_generate_scenario_failure(self, mock_generator_class):
         """Test scenario generation failure"""
         # Mock generator to raise exception
         mock_generator = MagicMock()
-        mock_generator.generate_scenario = AsyncMock(side_effect=Exception("Generation failed"))
+        mock_generator.generate_scenario = AsyncMock(
+            side_effect=Exception("Generation failed")
+        )
         mock_generator_class.return_value = mock_generator
 
         request_data = {"description": "A failing description"}

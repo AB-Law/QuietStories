@@ -209,7 +209,7 @@ class ApiService {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         description,
         max_tokens: maxTokens || 500
       }),
@@ -234,4 +234,3 @@ class ApiService {
 }
 
 export const apiService = new ApiService();
-
