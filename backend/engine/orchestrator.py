@@ -31,6 +31,27 @@ from backend.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _get_message_content_as_string(message: BaseMessage) -> str:
+    """
+    Get message content as string, handling both string and list formats.
+
+    Args:
+        message: LangChain message object
+
+    Returns:
+        Content as string, empty string if None
+    """
+    content = message.content
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        # Join list elements that are strings
+        return " ".join(str(item) for item in content if isinstance(item, (str, dict)))
+    return str(content)
+
+
 class AgentState(TypedDict):
     """
     Agent state schema for the Langgraph StateGraph.
@@ -121,12 +142,16 @@ class TurnOrchestrator:
         """
         return {
             "turn_count": self.memory.get_turn_count(),
-            "private_memory_keys": list(self.memory.private_memory.keys())
-            if hasattr(self.memory, "private_memory")
-            else [],
-            "public_memory_size": len(self.memory.public_memory)
-            if hasattr(self.memory, "public_memory")
-            else 0,
+            "private_memory_keys": (
+                list(self.memory.private_memory.keys())
+                if hasattr(self.memory, "private_memory")
+                else []
+            ),
+            "public_memory_size": (
+                len(self.memory.public_memory)
+                if hasattr(self.memory, "public_memory")
+                else 0
+            ),
             "session_id": self.memory.session_id,
         }
 
@@ -139,7 +164,7 @@ class TurnOrchestrator:
         """
         self._session_ref = session_ref
 
-    def _build_graph(self) -> StateGraph:
+    def _build_graph(self):
         """
         Build the Langgraph StateGraph for agent orchestration.
 
@@ -206,7 +231,9 @@ class TurnOrchestrator:
 
         # Count error messages
         error_count = sum(
-            1 for m in tool_messages if "error" in (m.content or "").lower()
+            1
+            for m in tool_messages
+            if "error" in _get_message_content_as_string(m).lower()
         )
 
         if error_count > 0:
@@ -233,7 +260,9 @@ class TurnOrchestrator:
         messages = state["messages"]
         tool_messages = [m for m in messages if isinstance(m, ToolMessage)]
         error_messages = [
-            m for m in tool_messages if "error" in (m.content or "").lower()
+            m
+            for m in tool_messages
+            if "error" in _get_message_content_as_string(m).lower()
         ]
 
         # Analyze error patterns
@@ -276,7 +305,7 @@ class TurnOrchestrator:
         severity_indicators = []
 
         for msg in error_messages:
-            content = (msg.content or "").lower()
+            content = _get_message_content_as_string(msg).lower()
 
             # Categorize error types
             if "not found" in content or "missing" in content:
@@ -379,7 +408,9 @@ class TurnOrchestrator:
 
         # Check for errors in tool execution
         error_messages = [
-            m for m in recent_tool_messages if "error" in (m.content or "").lower()
+            m
+            for m in recent_tool_messages
+            if "error" in _get_message_content_as_string(m).lower()
         ]
         if error_messages:
             logger.warning(
@@ -407,7 +438,7 @@ class TurnOrchestrator:
         # Extract tool names and results
         tool_info = []
         for msg in tool_messages:
-            content = msg.content or ""
+            content = _get_message_content_as_string(msg)
             tool_info.append(
                 {
                     "success": "error" not in content.lower(),
@@ -434,11 +465,13 @@ class TurnOrchestrator:
             "success_rate": success_rate,
             "avg_result_length": avg_result_length,
             "state_modifications": state_modifications,
-            "effectiveness": "high"
-            if success_rate > 0.8
-            else "medium"
-            if success_rate > 0.5
-            else "low",
+            "effectiveness": (
+                "high"
+                if success_rate > 0.8
+                else "medium"
+                if success_rate > 0.5
+                else "low"
+            ),
         }
 
     def _create_error_recovery_context(
@@ -458,16 +491,18 @@ class TurnOrchestrator:
             error_details.append(
                 {
                     "tool_call_id": getattr(msg, "tool_call_id", "unknown"),
-                    "error_content": msg.content[:200] if msg.content else "No content",
+                    "error_content": _get_message_content_as_string(msg)[:200],
                 }
             )
 
         return {
             "error_count": len(error_messages),
             "error_details": error_details,
-            "recovery_strategy": "retry_with_different_params"
-            if len(error_details) == 1
-            else "simplify_approach",
+            "recovery_strategy": (
+                "retry_with_different_params"
+                if len(error_details) == 1
+                else "simplify_approach"
+            ),
         }
 
     async def _call_agent(self, state: AgentState) -> Dict[str, Any]:
@@ -578,7 +613,7 @@ class TurnOrchestrator:
                 return "outcome"
 
         # Check content for decision indicators
-        content = last_message.content or ""
+        content = _get_message_content_as_string(last_message)
 
         # Keywords indicating the agent wants to finish
         finish_keywords = [
