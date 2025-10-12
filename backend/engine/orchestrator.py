@@ -75,9 +75,9 @@ class TurnOrchestrator:
             session_id, db_manager, private_memory, public_memory, turn_count
         )
         self.tools = self.compiler.get_tools()
-        self._session_ref: Optional[
-            Dict[str, Any]
-        ] = None  # Will be set to access session data
+        self._session_ref: Optional[Dict[str, Any]] = (
+            None  # Will be set to access session data
+        )
 
     def set_session_ref(self, session_ref: Dict[str, Any]):
         """
@@ -125,7 +125,9 @@ class TurnOrchestrator:
         logger.info(
             f"[Orchestrator] 🎯 Starting agentic tool calling loop (max {max_rounds} rounds)"
         )
-        logger.info(f"[Orchestrator] 🔨 Available tools: {[t.name for t in self.tools]}")
+        logger.info(
+            f"[Orchestrator] 🔨 Available tools: {[t.name for t in self.tools]}"
+        )
 
         while round_num < max_rounds:
             round_num += 1

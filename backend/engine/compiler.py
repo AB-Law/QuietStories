@@ -43,7 +43,9 @@ class ScenarioCompiler:
 
         class ReadStateTool(BaseTool):
             name: str = "read_state"
-            description: str = "Query the current game state at a specific path. Use this to check current values before making decisions."
+            description: str = (
+                "Query the current game state at a specific path. Use this to check current values before making decisions."
+            )
 
             def _run(self, path: str) -> str:
                 """Read state at the given path"""
@@ -91,7 +93,9 @@ class ScenarioCompiler:
 
         class UpdateStateTool(BaseTool):
             name: str = "update_state"
-            description: str = "Modify the game state with set, inc, dec, mul, patch, push, pop, or addlog operations."
+            description: str = (
+                "Modify the game state with set, inc, dec, mul, patch, push, pop, or addlog operations."
+            )
 
             def _run(self, op: str, path: str, value: Any) -> str:
                 """Update state with the given operation"""
@@ -154,7 +158,9 @@ class ScenarioCompiler:
 
         class CreateCharacterTool(BaseTool):
             name: str = "create_character"
-            description: str = "Add a NEW character/entity to the game world. Only use this for characters that don't exist yet. Provide id, type, name, and optionally background."
+            description: str = (
+                "Add a NEW character/entity to the game world. Only use this for characters that don't exist yet. Provide id, type, name, and optionally background."
+            )
 
             def _run(
                 self, id: str, type: str, name: str, background: Optional[str] = None
@@ -203,7 +209,9 @@ class ScenarioCompiler:
 
         class UpdateWorldTool(BaseTool):
             name: str = "update_world"
-            description: str = "Update world state like time, weather, locations, etc. Provide key-value pairs as separate parameters (e.g., time_of_day='evening', weather='rainy')."
+            description: str = (
+                "Update world state like time, weather, locations, etc. Provide key-value pairs as separate parameters (e.g., time_of_day='evening', weather='rainy')."
+            )
 
             def _run(self, **kwargs) -> str:
                 """Update world state with any key-value pairs"""
@@ -240,7 +248,9 @@ class ScenarioCompiler:
 
         class AddMemoryTool(BaseTool):
             name: str = "add_memory"
-            description: str = "Record a memory for an entity. Specify entity_id, content, and visibility (private or public)."
+            description: str = (
+                "Record a memory for an entity. Specify entity_id, content, and visibility (private or public)."
+            )
 
             def _run(
                 self, entity_id: str, content: str, visibility: str = "private"
