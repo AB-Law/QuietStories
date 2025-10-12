@@ -27,7 +27,7 @@ jobs:
         mypy backend/
     - name: Run tests
       run: |
-        python -m pytest random/tests/ -v
+        python -m pytest backend/tests/ -v
 
   frontend:
     runs-on: ubuntu-latest
