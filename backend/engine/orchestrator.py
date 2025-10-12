@@ -51,6 +51,8 @@ class AgentState(TypedDict):
     user_input: Optional[str]  # Current user input
     conversation_summary: Optional[Dict[str, Any]]  # Summary for persistence
     memory_state: Optional[Dict[str, Any]]  # Memory manager state snapshot
+    error_recovery_active: Optional[bool]  # Whether error recovery is active
+    error_context: Optional[Dict[str, Any]]  # Error context for recovery
 
 
 class TurnOrchestrator:
@@ -157,21 +159,316 @@ class TurnOrchestrator:
         tool_node = ToolNode(self.tools)
         builder.add_node("tools", tool_node)
 
+        # Add tool result processing node
+        builder.add_node("process_tools", self._process_tool_results)
+
+        # Add error handling node
+        builder.add_node("handle_errors", self._handle_errors)
+
         # Add final outcome node for structured response
         builder.add_node("outcome", self._generate_outcome)
 
-        # Define the flow
+        # Define the enhanced flow
         builder.add_edge(START, "agent")
         builder.add_conditional_edges(
             "agent",
             self._should_continue,
             {"tools": "tools", "outcome": "outcome", END: END},
         )
-        builder.add_edge("tools", "agent")
+        # After tools, process results with error handling
+        builder.add_conditional_edges(
+            "tools",
+            self._check_for_errors,
+            {"process": "process_tools", "error": "handle_errors"},
+        )
+        builder.add_edge("process_tools", "agent")
+        builder.add_edge("handle_errors", "agent")
         builder.add_edge("outcome", END)
 
         # Compile with checkpointer
         return builder.compile(checkpointer=self.checkpointer)
+
+    def _check_for_errors(self, state: AgentState) -> str:
+        """
+        Check if recent tool execution had errors requiring special handling.
+
+        Args:
+            state: Current agent state
+
+        Returns:
+            "error" if errors detected, "process" for normal processing
+        """
+        messages = state["messages"]
+
+        # Check last few messages for tool errors
+        recent_messages = messages[-5:] if len(messages) >= 5 else messages
+        tool_messages = [m for m in recent_messages if isinstance(m, ToolMessage)]
+
+        # Count error messages
+        error_count = sum(
+            1 for m in tool_messages if "error" in (m.content or "").lower()
+        )
+
+        if error_count > 0:
+            logger.debug(
+                f"[ErrorChecker] Detected {error_count} tool errors, routing to error handler"
+            )
+            return "error"
+
+        logger.debug("[ErrorChecker] No errors detected, routing to normal processing")
+        return "process"
+
+    async def _handle_errors(self, state: AgentState) -> Dict[str, Any]:
+        """
+        Handle tool execution errors with recovery strategies.
+
+        Args:
+            state: Current agent state with errors
+
+        Returns:
+            Updated state with error recovery information
+        """
+        logger.debug("[ErrorHandler] Handling tool execution errors")
+
+        messages = state["messages"]
+        tool_messages = [m for m in messages if isinstance(m, ToolMessage)]
+        error_messages = [
+            m for m in tool_messages if "error" in (m.content or "").lower()
+        ]
+
+        # Analyze error patterns
+        error_analysis = self._analyze_errors(error_messages)
+
+        # Create recovery message for the agent
+        recovery_message = self._create_recovery_message(error_analysis)
+
+        # Update state with recovery context
+        current_tool_results = state.get("tool_results", [])
+        new_tool_results = current_tool_results + [
+            {
+                "execution_count": len(current_tool_results) + 1,
+                "errors_detected": len(error_messages),
+                "error_analysis": error_analysis,
+                "recovery_attempted": True,
+            }
+        ]
+
+        return {
+            "messages": [recovery_message],
+            "tool_results": new_tool_results,
+            "error_recovery_active": True,
+        }
+
+    def _analyze_errors(self, error_messages: List[ToolMessage]) -> Dict[str, Any]:
+        """
+        Analyze error patterns to determine recovery strategy.
+
+        Args:
+            error_messages: Messages containing tool errors
+
+        Returns:
+            Error analysis results
+        """
+        if not error_messages:
+            return {"error_count": 0, "error_types": [], "severity": "none"}
+
+        error_types = []
+        severity_indicators = []
+
+        for msg in error_messages:
+            content = (msg.content or "").lower()
+
+            # Categorize error types
+            if "not found" in content or "missing" in content:
+                error_types.append("missing_resource")
+            elif "permission" in content or "forbidden" in content:
+                error_types.append("permission")
+            elif "syntax" in content or "invalid" in content:
+                error_types.append("syntax")
+            elif "timeout" in content or "network" in content:
+                error_types.append("network")
+            else:
+                error_types.append("unknown")
+
+            # Assess severity
+            if "critical" in content or "fatal" in content:
+                severity_indicators.append("high")
+            elif "warning" in content:
+                severity_indicators.append("low")
+            else:
+                severity_indicators.append("medium")
+
+        # Determine overall severity
+        if "high" in severity_indicators:
+            overall_severity = "high"
+        elif all(s == "low" for s in severity_indicators):
+            overall_severity = "low"
+        else:
+            overall_severity = "medium"
+
+        return {
+            "error_count": len(error_messages),
+            "error_types": list(set(error_types)),
+            "severity": overall_severity,
+            "recoverable": overall_severity != "high",
+        }
+
+    def _create_recovery_message(self, error_analysis: Dict[str, Any]) -> HumanMessage:
+        """
+        Create a recovery message to guide the agent after errors.
+
+        Args:
+            error_analysis: Results from error analysis
+
+        Returns:
+            Human message with recovery guidance
+        """
+        error_count = error_analysis.get("error_count", 0)
+        error_types = error_analysis.get("error_types", [])
+        severity = error_analysis.get("severity", "unknown")
+        recoverable = error_analysis.get("recoverable", True)
+
+        if not recoverable:
+            content = f"Critical errors detected ({error_count} errors). Please provide a narrative outcome based on current state without further tool usage."
+        elif "missing_resource" in error_types:
+            content = f"Some resources were not found ({error_count} errors). Try using different parameters or create the missing resources first."
+        elif "syntax" in error_types:
+            content = f"Syntax errors detected ({error_count} errors). Check your tool parameters and try again with corrected values."
+        elif error_count > 2:
+            content = f"Multiple tool errors ({error_count} errors). Consider simplifying your approach or proceeding with the narrative based on current state."
+        else:
+            content = f"Tool error detected ({error_count} errors). You can retry with different parameters or proceed to create the narrative outcome."
+
+        return HumanMessage(content=content)
+
+    async def _process_tool_results(self, state: AgentState) -> Dict[str, Any]:
+        """
+        Process tool results and update state accordingly.
+
+        This node analyzes tool execution results and updates the
+        agent state with insights and processed information.
+
+        Args:
+            state: Current agent state with tool results
+
+        Returns:
+            Updated state with processed tool information
+        """
+        logger.debug("[ToolProcessor] Processing tool execution results")
+
+        messages = state["messages"]
+        current_tool_results = state.get("tool_results", [])
+
+        # Find recent tool messages
+        tool_messages = [m for m in messages if isinstance(m, ToolMessage)]
+        recent_tool_messages = (
+            tool_messages[-3:] if len(tool_messages) >= 3 else tool_messages
+        )
+
+        # Analyze tool execution patterns
+        tool_analysis = self._analyze_tool_usage(recent_tool_messages, state)
+
+        # Update tool results in state
+        new_tool_results = current_tool_results + [
+            {
+                "execution_count": len(current_tool_results) + 1,
+                "tools_in_batch": len(recent_tool_messages),
+                "analysis": tool_analysis,
+            }
+        ]
+
+        # Check for errors in tool execution
+        error_messages = [
+            m for m in recent_tool_messages if "error" in (m.content or "").lower()
+        ]
+        if error_messages:
+            logger.warning(
+                f"[ToolProcessor] Detected {len(error_messages)} tool errors"
+            )
+            # Add error recovery context
+            recovery_context = self._create_error_recovery_context(error_messages)
+            return {"tool_results": new_tool_results, "error_context": recovery_context}
+
+        return {"tool_results": new_tool_results}
+
+    def _analyze_tool_usage(
+        self, tool_messages: List[ToolMessage], state: AgentState
+    ) -> Dict[str, Any]:
+        """
+        Analyze recent tool usage patterns for optimization.
+
+        Args:
+            tool_messages: Recent tool execution messages
+            state: Current agent state
+
+        Returns:
+            Analysis results dictionary
+        """
+        # Extract tool names and results
+        tool_info = []
+        for msg in tool_messages:
+            content = msg.content or ""
+            tool_info.append(
+                {
+                    "success": "error" not in content.lower(),
+                    "result_length": len(content),
+                    "contains_state_change": "state" in content.lower(),
+                }
+            )
+
+        # Calculate effectiveness metrics
+        success_rate = (
+            sum(1 for t in tool_info if t["success"]) / len(tool_info)
+            if tool_info
+            else 0
+        )
+        avg_result_length = (
+            sum(t["result_length"] for t in tool_info) / len(tool_info)
+            if tool_info
+            else 0
+        )
+        state_modifications = sum(1 for t in tool_info if t["contains_state_change"])
+
+        return {
+            "tool_count": len(tool_messages),
+            "success_rate": success_rate,
+            "avg_result_length": avg_result_length,
+            "state_modifications": state_modifications,
+            "effectiveness": "high"
+            if success_rate > 0.8
+            else "medium"
+            if success_rate > 0.5
+            else "low",
+        }
+
+    def _create_error_recovery_context(
+        self, error_messages: List[ToolMessage]
+    ) -> Dict[str, Any]:
+        """
+        Create context information for error recovery.
+
+        Args:
+            error_messages: Tool messages containing errors
+
+        Returns:
+            Recovery context dictionary
+        """
+        error_details = []
+        for msg in error_messages:
+            error_details.append(
+                {
+                    "tool_call_id": getattr(msg, "tool_call_id", "unknown"),
+                    "error_content": msg.content[:200] if msg.content else "No content",
+                }
+            )
+
+        return {
+            "error_count": len(error_messages),
+            "error_details": error_details,
+            "recovery_strategy": "retry_with_different_params"
+            if len(error_details) == 1
+            else "simplify_approach",
+        }
 
     async def _call_agent(self, state: AgentState) -> Dict[str, Any]:
         """
@@ -239,7 +536,7 @@ class TurnOrchestrator:
 
     def _should_continue(self, state: AgentState) -> str:
         """
-        Conditional routing function to decide next step.
+        Enhanced conditional routing function with intelligent decisions.
 
         Args:
             state: Current agent state
@@ -252,32 +549,67 @@ class TurnOrchestrator:
 
         # If the LLM made tool calls, execute tools
         if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-            logger.debug(
-                f"[Router] Routing to tools: {len(last_message.tool_calls)} tool calls"
-            )
+            tool_names = [tc.get("name", "unknown") for tc in last_message.tool_calls]
+            logger.debug(f"[Router] Routing to tools: {tool_names}")
             return "tools"
 
-        # Check if we've exceeded max rounds (simple counter from tool_results)
+        # Enhanced routing logic based on context and tool results
         tool_results_count = len(state.get("tool_results", []))
-        max_rounds = 5
+        conversation_summary = state.get("conversation_summary", {})
 
+        # Check if we've used too many tools
+        max_rounds = 5
         if tool_results_count >= max_rounds:
             logger.debug(
-                f"[Router] Max rounds reached ({max_rounds}), routing to outcome"
+                f"[Router] Max tool rounds reached ({max_rounds}), routing to outcome"
             )
             return "outcome"
 
-        # Check if response looks like final narrative (simple heuristic)
+        # Analyze conversation patterns for better routing
+        if conversation_summary:
+            tools_used = conversation_summary.get("tools_used", [])
+            message_count = conversation_summary.get("total_messages", 0)
+
+            # If many tools used but no recent progress, finish
+            if len(tools_used) >= 3 and message_count > 10:
+                logger.debug(
+                    "[Router] Detected extensive tool usage, finalizing outcome"
+                )
+                return "outcome"
+
+        # Check content for decision indicators
         content = last_message.content or ""
-        if any(
-            keyword in content.lower()
-            for keyword in ["narrative", "story", "continues", "outcome"]
-        ):
-            logger.debug("[Router] Detected narrative content, routing to outcome")
+
+        # Keywords indicating the agent wants to finish
+        finish_keywords = [
+            "narrative",
+            "story",
+            "outcome",
+            "conclude",
+            "finally",
+            "in summary",
+        ]
+        if any(keyword in content.lower() for keyword in finish_keywords):
+            logger.debug("[Router] Detected conclusion keywords, routing to outcome")
+            return "outcome"
+
+        # Keywords indicating more analysis needed
+        analysis_keywords = ["need to", "should check", "let me", "first", "analyze"]
+        if any(keyword in content.lower() for keyword in analysis_keywords):
+            logger.debug("[Router] Detected analysis needs, allowing more tool usage")
+            # Don't force outcome yet, let agent decide if it wants tools
+
+        # Check game state complexity for routing decisions
+        game_state = state.get("game_state", {})
+        entities = state.get("entities", [])
+
+        # If game state is simple and few entities, lean toward completion
+        if len(entities) <= 2 and len(str(game_state)) < 500:
+            logger.debug("[Router] Simple game state detected, routing to outcome")
             return "outcome"
 
         # Default to outcome for final structured response
-        logger.debug("[Router] Routing to outcome for final response")
+        logger.debug("[Router] Default routing to outcome")
         return "outcome"
 
     async def _generate_outcome(self, state: AgentState) -> Dict[str, Any]:
@@ -386,6 +718,8 @@ class TurnOrchestrator:
             "user_input": user_input,
             "conversation_summary": None,
             "memory_state": self._get_memory_state_snapshot(),
+            "error_recovery_active": False,
+            "error_context": None,
         }
 
         # Configure graph execution with thread ID
