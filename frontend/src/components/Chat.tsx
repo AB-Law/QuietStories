@@ -492,13 +492,12 @@ export function Chat() {
             <CardTitle className="text-lg">World Info</CardTitle>
           </CardHeader>
           <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
-            {/* Scenario Name */}
-            {currentSession.scenario_spec?.name && (
+            {currentSession.scenario_spec?.name ? (
               <div>
                 <h3 className="font-semibold text-sm text-muted-foreground mb-1">Scenario</h3>
-                <p className="text-sm">{currentSession.scenario_spec.name}</p>
+                <p className="text-sm">{currentSession.scenario_spec.name as string}</p>
               </div>
-            )}
+            ) : null}
 
             {/* Turn Counter */}
             <div>
