@@ -53,10 +53,10 @@ export function Chat() {
     try {
       const session = await apiService.getSession(sessionId);
       setCurrentSession(session);
-      
+
       // Load turn history as messages
       const historyMessages: Message[] = [];
-      
+
       if (session.turn_history && session.turn_history.length > 0) {
         session.turn_history.forEach((turn) => {
           // Add user action message
@@ -69,7 +69,7 @@ export function Chat() {
               turnNumber: turn.turn,
             });
           }
-          
+
           // Add assistant narrative message
           historyMessages.push({
             id: `turn-${turn.turn}-assistant`,
@@ -80,7 +80,7 @@ export function Chat() {
           });
         });
       }
-      
+
       // Add system message if there's history
       if (historyMessages.length > 0) {
         historyMessages.unshift({
@@ -97,7 +97,7 @@ export function Chat() {
           timestamp: new Date(),
         });
       }
-      
+
       setMessages(historyMessages);
     } catch (error) {
       console.error('Failed to load session:', error);
@@ -158,7 +158,7 @@ export function Chat() {
       // Fetch full session data (includes world_background, entities, etc.)
       const fullSession = await apiService.getSession(sessionResponse.id);
       setCurrentSession(fullSession);
-      
+
       // Create welcome message with world background
       const welcomeMessages: Message[] = [
         {
@@ -168,7 +168,7 @@ export function Chat() {
           timestamp: new Date(),
         },
       ];
-      
+
       // Add world background as a narrative message if available
       if (fullSession.world_background) {
         welcomeMessages.push({
@@ -179,7 +179,7 @@ export function Chat() {
           turnNumber: 0,
         });
       }
-      
+
       setMessages(welcomeMessages);
       setScenarioDescription('');
     } catch (error) {
@@ -235,7 +235,7 @@ export function Chat() {
         // Fallback to just updating turn count
         setCurrentSession((prev) => (prev ? { ...prev, turn: response.turn } : null));
       }
-      
+
       // Refocus input after message is sent
       setTimeout(() => inputRef.current?.focus(), 100);
     } catch (error) {
@@ -349,7 +349,7 @@ export function Chat() {
                     )}
                   </Button>
                 </div>
-                
+
                 {/* Advanced Options */}
                 <div className="border-t pt-4">
                   <Button
@@ -360,7 +360,7 @@ export function Chat() {
                   >
                     {showAdvanced ? '▼ Hide' : '▶ Show'} Advanced Options
                   </Button>
-                  
+
                   {showAdvanced && (
                     <div className="space-y-3 mt-3 p-4 border rounded-md bg-muted/20">
                       <div>
@@ -379,7 +379,7 @@ export function Chat() {
                           More characters = longer session creation time
                         </p>
                       </div>
-                      
+
                       <div className="flex items-center space-x-2">
                         <input
                           type="checkbox"
@@ -392,7 +392,7 @@ export function Chat() {
                           Generate World Background
                         </label>
                       </div>
-                      
+
                       <div className="flex items-center space-x-2">
                         <input
                           type="checkbox"
@@ -408,7 +408,7 @@ export function Chat() {
                     </div>
                   )}
                 </div>
-                
+
                 <p className="text-xs text-muted-foreground text-center">
                   💡 Tip: Use "Enrich Prompt" to let the AI expand your idea into a detailed scenario
                 </p>
@@ -556,4 +556,3 @@ export function Chat() {
     </div>
   );
 }
-

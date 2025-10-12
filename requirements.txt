@@ -28,3 +28,4 @@ pytest-cov
 black
 isort
 mypy
+pre-commit
