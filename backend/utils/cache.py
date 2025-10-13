@@ -8,8 +8,8 @@ and reduce computational overhead in the QuietStories application.
 import hashlib
 import json
 import time
-from typing import Any, Dict, Optional, Tuple
 from functools import lru_cache
+from typing import Any, Dict, Optional, Tuple
 
 from backend.utils.logger import get_logger
 
@@ -41,10 +41,7 @@ class ResponseCache:
     def _make_key(self, *args, **kwargs) -> str:
         """Generate a cache key from arguments."""
         # Create a normalized representation of the arguments
-        key_data = {
-            'args': args,
-            'kwargs': kwargs
-        }
+        key_data = {"args": args, "kwargs": kwargs}
 
         # Convert to JSON string for consistent hashing
         key_str = json.dumps(key_data, sort_keys=True)
@@ -94,13 +91,16 @@ class ResponseCache:
         # Implement simple LRU by removing oldest items if at max size
         if len(self.cache) >= self.max_size:
             # Remove oldest items (simple implementation)
-            oldest_keys = sorted(self.cache.keys(),
-                               key=lambda k: self.cache[k][1])[:len(self.cache) // 4]
+            oldest_keys = sorted(self.cache.keys(), key=lambda k: self.cache[k][1])[
+                : len(self.cache) // 4
+            ]
             for old_key in oldest_keys:
                 del self.cache[old_key]
 
         self.cache[key] = (value, expiry)
-        logger.debug(f"Cached item with key: {key[:8]}... (TTL: {ttl or self.default_ttl}s)")
+        logger.debug(
+            f"Cached item with key: {key[:8]}... (TTL: {ttl or self.default_ttl}s)"
+        )
 
     def clear(self) -> None:
         """Clear all cached items."""
@@ -115,12 +115,12 @@ class ResponseCache:
         hit_rate = (self.hits / total_requests * 100) if total_requests > 0 else 0
 
         return {
-            'size': len(self.cache),
-            'max_size': self.max_size,
-            'hits': self.hits,
-            'misses': self.misses,
-            'hit_rate': hit_rate,
-            'total_requests': total_requests
+            "size": len(self.cache),
+            "max_size": self.max_size,
+            "hits": self.hits,
+            "misses": self.misses,
+            "hit_rate": hit_rate,
+            "total_requests": total_requests,
         }
 
 
@@ -182,8 +182,7 @@ class MemoryCache:
     def clear_session(self, session_id: str) -> None:
         """Clear all cached data for a specific session."""
         keys_to_remove = [
-            k for k in self.entity_summaries.keys()
-            if k.startswith(f"{session_id}:")
+            k for k in self.entity_summaries.keys() if k.startswith(f"{session_id}:")
         ]
 
         for key in keys_to_remove:
@@ -200,9 +199,9 @@ class MemoryCache:
     def stats(self) -> Dict[str, Any]:
         """Get memory cache statistics."""
         return {
-            'entity_summaries': len(self.entity_summaries),
-            'relationship_data': len(self.relationship_data),
-            'emotional_states': len(self.emotional_states)
+            "entity_summaries": len(self.entity_summaries),
+            "relationship_data": len(self.relationship_data),
+            "emotional_states": len(self.emotional_states),
         }
 
 
@@ -231,6 +230,7 @@ def cache_prompt_result(func):
     This decorator can be applied to any function that processes
     prompts to cache the results and avoid redundant processing.
     """
+
     def wrapper(*args, **kwargs):
         # Try to get from cache first
         cached_result = response_cache.get(*args, **kwargs)
@@ -262,6 +262,6 @@ def invalidate_session_cache(session_id: str) -> None:
 def get_cache_statistics() -> Dict[str, Any]:
     """Get comprehensive cache statistics."""
     return {
-        'response_cache': response_cache.stats(),
-        'memory_cache': memory_cache.stats()
+        "response_cache": response_cache.stats(),
+        "memory_cache": memory_cache.stats(),
     }
