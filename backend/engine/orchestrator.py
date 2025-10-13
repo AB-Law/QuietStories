@@ -22,7 +22,7 @@ from typing_extensions import TypedDict
 
 from backend.db.manager import DatabaseManager
 from backend.engine.compiler import ScenarioCompiler
-from backend.engine.memory import MemoryManager
+from backend.engine.memory import MemoryManager, MemoryScope, MemoryVisibility
 from backend.prompts import NARRATOR_SYSTEM, NARRATOR_USER
 from backend.providers import create_provider
 from backend.schemas import Outcome, ScenarioSpec
@@ -199,6 +199,9 @@ class TurnOrchestrator:
         # Add final outcome node for structured response
         builder.add_node("outcome", self._generate_outcome)
 
+        # Add reflection node for post-narrative memory updates
+        builder.add_node("reflection", self._perform_reflection)
+
         # Define the enhanced flow
         builder.add_edge(START, "agent")
         builder.add_conditional_edges(
@@ -214,10 +217,113 @@ class TurnOrchestrator:
         )
         builder.add_edge("process_tools", "agent")
         builder.add_edge("handle_errors", "agent")
-        builder.add_edge("outcome", END)
+        builder.add_edge("outcome", "reflection")
+        builder.add_edge("reflection", END)
 
         # Compile with checkpointer
         return builder.compile(checkpointer=self.checkpointer)
+
+    async def _perform_reflection(self, state: AgentState) -> Dict[str, Any]:
+        """
+        Perform reflection phase after narrative generation.
+
+        This node analyzes the generated outcome and prompts the LLM to:
+        - Update character memories based on what happened
+        - Record important observations and thoughts
+        - Update relationships and world state as needed
+
+        Args:
+            state: Current agent state with outcome
+
+        Returns:
+            Updated state (may include additional tool calls for memory updates)
+        """
+        logger.debug("[Reflection] Starting reflection phase")
+
+        messages = state["messages"]
+        outcome_message = None
+
+        # Find the most recent outcome message
+        for msg in reversed(messages):
+            if hasattr(msg, "content") and msg.content:
+                content = msg.content
+                if isinstance(content, str):
+                    content_lower = content.lower()
+                    if "narrative" in content_lower and (
+                        "turn" in content_lower or "story" in content_lower
+                    ):
+                        outcome_message = msg
+                        break
+
+        if not outcome_message:
+            logger.warning("[Reflection] No outcome message found for reflection")
+            return {"messages": messages}
+
+        # Create reflection prompt
+        reflection_prompt = self._create_reflection_prompt(state, outcome_message)
+
+        # Add reflection message to conversation
+        messages.append(HumanMessage(content=reflection_prompt))
+
+        # Get reflection response (may include tool calls for memory updates)
+        reflection_response = await self.provider.chat(
+            messages=messages, tools=self.tools
+        )
+
+        # Add reflection response to messages
+        if reflection_response.tool_calls:
+            assistant_message = AIMessage(
+                content=reflection_response.content or "",
+                tool_calls=reflection_response.tool_calls,
+            )
+        else:
+            assistant_message = AIMessage(content=reflection_response.content or "")
+
+        logger.debug("[Reflection] Reflection phase completed")
+        return {"messages": messages + [assistant_message]}
+
+    def _create_reflection_prompt(
+        self, state: AgentState, outcome_message: BaseMessage
+    ) -> str:
+        """
+        Create a reflection prompt to analyze the outcome and update memories.
+
+        Args:
+            state: Current agent state
+            outcome_message: The outcome message to analyze
+
+        Returns:
+            Reflection prompt string
+        """
+        # Extract key information from the outcome
+        outcome_content = outcome_message.content or ""
+
+        # Get recent context for reflection
+        recent_context = self._build_context_from_state(state)
+
+        return f"""REFLECTION PHASE: Analyze the recent outcome and update memories accordingly.
+
+Recent Outcome:
+{outcome_content[:500]}{'...' if len(outcome_content) > 500 else ''}
+
+Current Context:
+- Turn: {recent_context.get('turn', 'unknown')}
+- Entities: {len(recent_context.get('entities', []))} active
+- Location: {recent_context.get('state', {}).get('location', 'unknown')}
+
+Based on this outcome, consider:
+1. **Character Memories**: What should NPCs remember about these events?
+2. **Relationship Updates**: How did interactions affect relationships?
+3. **World State**: What changed in the world that should be remembered?
+4. **Important Observations**: What key details emerged that characters should recall?
+
+Use memory tools to record these insights. Focus on:
+- NPC thoughts and reactions to events
+- Relationship developments (trust, affection, rivalries)
+- World changes that affect future decisions
+- Key information that might be relevant later
+
+What memories should be recorded from this turn?"""
 
     def _check_for_errors(self, state: AgentState) -> str:
         """
@@ -893,10 +999,23 @@ class TurnOrchestrator:
             Context selection prioritizes recent information and
             summarizes older content to fit within LLM context limits.
         """
-        # Get POV entity's private memory + all public memory
+        # Get POV entity's private memory + curated public memory (hybrid approach)
         pov_entity = self._get_pov_entity()
-        private_memory = self.memory.get_private_memory(pov_entity)
-        public_memory = self.memory.get_public_memory()
+
+        # Hybrid memory retrieval: provide recent memories + allow LLM to query for more
+        private_memory = self._get_recent_memories(
+            pov_entity, scope=None, visibility="private", limit=5
+        )
+        public_memory = self._get_recent_memories(
+            pov_entity, scope=None, visibility="public", limit=3
+        )
+
+        # Add semantic search capability indicator
+        semantic_search_available = (
+            self.memory.semantic_search.is_available()
+            if hasattr(self.memory, "semantic_search")
+            else False
+        )
 
         # Get turn history for context
         recent_turns = self._get_recent_turns(3)  # Last 3 turns verbatim
@@ -917,6 +1036,7 @@ class TurnOrchestrator:
             "turn": self.memory.get_turn_count(),
             "available_actions": self._get_available_actions(),
             "world_background": world_background,
+            "semantic_search_available": semantic_search_available,
         }
 
     def _get_system_prompt(self) -> str:
@@ -1515,6 +1635,48 @@ Summary:"""
                 return f"You fail catastrophically! (rolled {roll} + {total - roll} modifier = {total} vs DC {roll_request.difficulty})"
             else:
                 return f"You fail. (rolled {roll} + {total - roll} modifier = {total} vs DC {roll_request.difficulty})"
+
+    def _get_recent_memories(
+        self,
+        entity_id: str,
+        scope: Optional[MemoryScope] = None,
+        visibility: Optional[MemoryVisibility] = None,
+        limit: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get recent memories for hybrid retrieval approach.
+
+        This method provides a curated selection of recent memories
+        rather than all memories, allowing the LLM to query for more
+        specific information using semantic search if needed.
+
+        Args:
+            entity_id: Entity to get memories for
+            scope: Memory scope filter (optional)
+            visibility: Memory visibility filter (optional)
+            limit: Maximum number of memories to return
+
+        Returns:
+            List of recent memories, sorted by importance and recency
+        """
+        # Use the enhanced memory system to get scoped memories
+        memories = self.memory.get_scoped_memory(
+            entity_id=entity_id, scope=scope, visibility=visibility, limit=limit
+        )
+
+        # Format for context (simplified format)
+        formatted_memories = []
+        for memory in memories:
+            formatted_memories.append(
+                {
+                    "content": memory["content"],
+                    "scope": memory["scope"],
+                    "turn": memory["turn"],
+                    "importance": memory.get("importance", 5),
+                }
+            )
+
+        return formatted_memories
 
     async def _execute_tool(self, tool_name: str, args: Dict[str, Any]) -> str:
         """

@@ -5,6 +5,11 @@ Enhanced memory management for scoped entity memory types
 from collections import defaultdict
 from typing import Any, Dict, List, Literal, Optional
 
+from backend.engine.memory_search import SemanticMemorySearch
+from backend.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 # Define valid memory scopes
 MemoryScope = Literal["belief", "relationship", "event", "location", "goal", "general"]
 
@@ -50,6 +55,9 @@ class MemoryManager:
         # Convert legacy format to scoped format if needed
         self._convert_legacy_memories()
 
+        # Initialize semantic search
+        self.semantic_search = SemanticMemorySearch()
+
     def get_private_memory(self, entity_id: str) -> List[Dict[str, Any]]:
         """Get private memory for an entity (legacy compatibility)"""
         return self.private_memory.get(entity_id, [])
@@ -78,6 +86,20 @@ class MemoryManager:
         }
 
         self.scoped_memory[entity_id][scope][visibility].append(memory_entry)
+
+        # Add to semantic search index
+        memory_id = f"{entity_id}_{scope}_{self.turn_count}_{len(self.scoped_memory[entity_id][scope][visibility])}"
+        metadata = {
+            "entity_id": entity_id,
+            "scope": scope,
+            "visibility": visibility,
+            "turn": self.turn_count,
+            "importance": importance,
+            "related_entities": related_entities or [],
+        }
+
+        if self.semantic_search.is_available():
+            self.semantic_search.add_memory(memory_id, content, metadata)
 
         # Update legacy format for backward compatibility
         if visibility == "private":
@@ -164,6 +186,102 @@ class MemoryManager:
     def get_location_memory(self, entity_id: str) -> List[Dict[str, Any]]:
         """Get location-related memories for an entity"""
         return self.get_scoped_memory(entity_id, scope="location")
+
+    def search_memories_semantic(
+        self,
+        query: str,
+        entity_id: Optional[str] = None,
+        scope: Optional[str] = None,
+        limit: int = 5,
+        threshold: float = 0.1,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search memories using semantic similarity.
+
+        Args:
+            query: The search query
+            entity_id: Filter by specific entity (optional)
+            scope: Filter by memory scope (optional)
+            limit: Maximum number of results to return
+            threshold: Minimum similarity threshold (0.0-1.0)
+
+        Returns:
+            List of matching memories with similarity scores
+        """
+        if not self.semantic_search.is_available():
+            logger.warning(
+                "Semantic search not available, falling back to text-based search"
+            )
+            return self._search_memories_text(query, entity_id, scope, limit)
+
+        return self.semantic_search.search_memories(
+            query=query,
+            entity_id=entity_id,
+            scope=scope,
+            limit=limit,
+            threshold=threshold,
+        )
+
+    def _search_memories_text(
+        self,
+        query: str,
+        entity_id: Optional[str] = None,
+        scope: Optional[str] = None,
+        limit: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fallback text-based search when semantic search is not available.
+
+        Args:
+            query: The search query
+            entity_id: Filter by specific entity (optional)
+            scope: Filter by memory scope (optional)
+            limit: Maximum number of results to return
+
+        Returns:
+            List of matching memories ranked by relevance
+        """
+        results = []
+
+        # Search through all scoped memories
+        for e_id, scopes in self.scoped_memory.items():
+            # Skip if filtering by entity
+            if entity_id and e_id != entity_id:
+                continue
+
+            for scope_name, visibilities in scopes.items():
+                # Skip if filtering by scope
+                if scope and scope_name != scope:
+                    continue
+
+                for visibility_name, memories in visibilities.items():
+                    for memory in memories:
+                        # Simple text matching (could be improved with better scoring)
+                        content_lower = memory["content"].lower()
+                        query_lower = query.lower()
+
+                        if query_lower in content_lower:
+                            relevance_score = len(query_lower) / len(
+                                content_lower
+                            )  # Simple relevance
+                            results.append(
+                                {
+                                    "memory_id": f"{e_id}_{scope_name}_{memory['turn']}",
+                                    "content": memory["content"],
+                                    "similarity": relevance_score,
+                                    "metadata": {
+                                        "entity_id": e_id,
+                                        "scope": scope_name,
+                                        "visibility": visibility_name,
+                                        "turn": memory["turn"],
+                                        "importance": memory.get("importance", 5),
+                                    },
+                                }
+                            )
+
+        # Sort by relevance and limit
+        results.sort(key=lambda x: x["similarity"], reverse=True)
+        return results[:limit]
 
     def _convert_legacy_memories(self):
         """Convert legacy memory format to scoped format"""

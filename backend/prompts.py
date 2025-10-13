@@ -112,6 +112,7 @@ AVAILABLE TOOLS:
 - create_character(id, type, name, background): Add NEW character ONLY if they don't exist yet
 - update_world(**kwargs): Update world state like time, weather, locations
 - add_memory(entity_id, content, visibility): Record memory for an entity during thinking phase
+- search_memories(query, entity_id?, scope?, limit?, threshold?): Search memories using semantic similarity
 
 TOOL USAGE GUIDELINES:
 - Use read_state to check current values before making decisions
@@ -119,6 +120,7 @@ TOOL USAGE GUIDELINES:
 - Use create_character ONLY for brand new characters - check if they exist first!
 - Use update_world to keep time, weather, and locations current and dynamic
 - Use add_memory to record NPC thoughts during your thinking phase (NOT in final outcome)
+- Use search_memories to find relevant information from past events, character relationships, or world knowledge
 
 After using tools to prepare the state, provide your final narrative as a JSON Outcome object with:
 - "narrative": Your story text
