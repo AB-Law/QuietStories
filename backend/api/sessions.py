@@ -5,6 +5,7 @@ This module handles game session creation, turn processing, and persistence.
 Sessions are stored in SQLite via DatabaseManager for persistence across restarts.
 """
 
+import asyncio
 import json
 import uuid
 from datetime import datetime
@@ -414,6 +415,161 @@ async def process_turn(session_id: str, request: SessionTurnRequest):
             "turn": session["turn"],
             "outcome": outcome.dict(),
         }
+
+
+@router.post("/{session_id}/turns/stream")
+async def stream_turn_response(session_id: str, request: SessionTurnRequest):
+    """
+    Stream turn response using Server-Sent Events for real-time narrative generation.
+
+    This endpoint:
+    1. Loads session from database
+    2. Processes the turn via orchestrator
+    3. Streams narrative text as it's generated token-by-token
+    4. Sends completion status
+
+    Args:
+        session_id: Session identifier
+        request: Turn request with optional action
+
+    Yields:
+        SSE messages with types: start, narrative_chunk, complete, error
+    """
+    logger.info("=" * 60)
+    logger.info(f"STREAMING TURN REQUEST")
+    logger.info(f"Session ID: {session_id}")
+    logger.info(f"Action: {request.action or '(none - auto turn)'}")
+
+    # Load session from database
+    session = db.get_session(session_id)
+    if not session:
+        logger.error(f"✗ Session not found: {session_id}")
+        yield f"data: {json.dumps({'type': 'error', 'message': 'Session not found'})}\n\n"
+        return
+
+    current_turn = session["turn"]
+    logger.info(f"Current turn: {current_turn}")
+
+    async def generate_stream():
+        try:
+            # Send initial status
+            yield f"data: {json.dumps({'type': 'start', 'turn': current_turn})}\n\n"
+
+            # Get or create orchestrator
+            if session_id not in orchestrators_db:
+                logger.warning(
+                    "Orchestrator not found in cache, recreating from session data..."
+                )
+                spec = ScenarioSpec(**session["scenario_spec"])
+                spec.entities = session.get("entities", spec.entities)
+                orchestrator = TurnOrchestrator(spec, session_id, db)
+                orchestrator.set_session_ref(session)
+                orchestrators_db[session_id] = orchestrator
+                logger.info("✓ Orchestrator recreated")
+            else:
+                orchestrator = orchestrators_db[session_id]
+                orchestrator.set_session_ref(session)
+
+            # Process turn with streaming
+            logger.info("Processing turn with streaming...")
+            outcome = await orchestrator.process_turn(request.action)
+
+            logger.info(f"✓ Turn processed successfully")
+            logger.info(f"Narrative length: {len(outcome.narrative)} characters")
+
+            # Stream the narrative in chunks for smooth UX
+            narrative = outcome.narrative
+            chunk_size = 100  # characters per chunk for smooth streaming
+
+            if narrative:
+                for i in range(0, len(narrative), chunk_size):
+                    chunk = narrative[i : i + chunk_size]
+                    yield f"data: {json.dumps({'type': 'narrative_chunk', 'content': chunk})}\n\n"
+                    await asyncio.sleep(0.05)  # Small delay for smooth streaming effect
+
+            # Apply state changes and update memory (existing logic)
+            if outcome.state_changes:
+                logger.info(f"Applying {len(outcome.state_changes)} state changes...")
+                orchestrator._apply_state_changes(outcome.state_changes)
+
+            # Increment turn counter
+            orchestrator.memory.increment_turn()
+            logger.info(f"Turn completed: {orchestrator.memory.get_turn_count()}")
+
+            # Save memory to database
+            orchestrator.memory.save_to_database()
+
+            # Create turn record for history
+            turn_record = {
+                "turn": current_turn + 1,
+                "timestamp": datetime.now().isoformat(),
+                "user_action": request.action,
+                "narrative": outcome.narrative,
+                "state_changes": (
+                    [sc.dict() for sc in outcome.state_changes]
+                    if outcome.state_changes
+                    else []
+                ),
+                "visible_dialogue": (
+                    [vd.dict() for vd in outcome.visible_dialogue]
+                    if outcome.visible_dialogue
+                    else []
+                ),
+                "roll_requests": (
+                    [rr.dict() for rr in outcome.roll_requests]
+                    if outcome.roll_requests
+                    else []
+                ),
+            }
+
+            # Update session in database
+            new_turn = current_turn + 1
+            state_after = orchestrator.spec.state
+
+            # Add turn to history
+            turn_history = session.get("turn_history", [])
+            turn_history.append(turn_record)
+
+            # Get updated entities and memories
+            entities = orchestrator.spec.entities
+            private_memory = dict(orchestrator.memory.private_memory)
+            public_memory = dict(orchestrator.memory.public_memory)
+
+            # Update in database
+            db.update_session(
+                session_id,
+                {
+                    "turn": new_turn,
+                    "state": state_after,
+                    "turn_history": turn_history,
+                    "entities": entities,
+                    "private_memory": private_memory,
+                    "public_memory": public_memory,
+                },
+            )
+
+            # Update session reference for orchestrator
+            session["turn"] = new_turn
+            session["state"] = state_after
+            session["turn_history"] = turn_history
+            session["entities"] = entities
+            orchestrator.set_session_ref(session)
+
+            # Send completion
+            yield f"data: {json.dumps({'type': 'complete', 'turn': new_turn})}\n\n"
+
+        except Exception as e:
+            logger.error(f"✗ Streaming turn processing failed: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @router.get("/{session_id}")
