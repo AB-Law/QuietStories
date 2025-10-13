@@ -789,6 +789,7 @@ class TurnOrchestrator:
                     visible_dialogue=None,
                     roll_requests=None,
                     hidden_memory_updates=None,
+                    suggested_actions=None,
                 )
             else:
                 # Parse outcome from final message
@@ -803,6 +804,7 @@ class TurnOrchestrator:
                 visible_dialogue=None,
                 roll_requests=None,
                 hidden_memory_updates=None,
+                suggested_actions=None,
             )
 
         # Apply state changes and update memory (existing logic)
@@ -1150,6 +1152,7 @@ Summary:"""
                 visible_dialogue=None,
                 roll_requests=None,
                 hidden_memory_updates=None,
+                suggested_actions=None,
             )
         except Exception as e:
             logger.error(f"Outcome parsing error: {e}", exc_info=True)
@@ -1160,6 +1163,7 @@ Summary:"""
                 visible_dialogue=None,
                 roll_requests=None,
                 hidden_memory_updates=None,
+                suggested_actions=None,
             )
 
     def _apply_state_changes(self, state_changes: List[Any]):
