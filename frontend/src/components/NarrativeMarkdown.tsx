@@ -1,21 +1,20 @@
 import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
 
 interface NarrativeMarkdownProps {
   children: string;
   className?: string;
 }
 
-
-
 // Custom renderer for blockquotes (often used for dialogue)
-const BlockquoteComponent = ({ children, ...props }: any) => (
+const BlockquoteComponent: Components['blockquote'] = ({ children, ...props }) => (
   <blockquote {...props} className="dialogue my-2 pl-4 border-l-2 border-primary italic text-foreground/90 bg-muted/20 rounded-r-md py-2 pr-3">
     {children}
   </blockquote>
 );
 
 // Custom renderer for paragraphs with enhanced formatting
-const ParagraphComponent = ({ children, ...props }: any) => {
+const ParagraphComponent: Components['p'] = ({ children, ...props }) => {
   // Convert children to string to check for dialogue patterns
   const text = typeof children === 'string' ? children : String(children);
 
@@ -50,50 +49,50 @@ export function NarrativeMarkdown({ children, className = '' }: NarrativeMarkdow
           blockquote: BlockquoteComponent,
           p: ParagraphComponent,
           // Strong and emphasis with better styling
-          strong: ({ children, ...props }: any) => (
+          strong: ({ children, ...props }) => (
             <strong {...props} className="font-semibold text-foreground">
               {children}
             </strong>
           ),
-          em: ({ children, ...props }: any) => (
+          em: ({ children, ...props }) => (
             <em {...props} className="italic text-foreground/90">
               {children}
             </em>
           ),
           // Headers with proper styling
-          h1: ({ children, ...props }: any) => (
+          h1: ({ children, ...props }) => (
             <h1 {...props} className="text-xl font-bold text-foreground mb-2 mt-4 first:mt-0">
               {children}
             </h1>
           ),
-          h2: ({ children, ...props }: any) => (
+          h2: ({ children, ...props }) => (
             <h2 {...props} className="text-lg font-semibold text-foreground mb-2 mt-3">
               {children}
             </h2>
           ),
-          h3: ({ children, ...props }: any) => (
+          h3: ({ children, ...props }) => (
             <h3 {...props} className="text-base font-semibold text-foreground mb-1 mt-2">
               {children}
             </h3>
           ),
           // Lists with proper spacing
-          ul: ({ children, ...props }: any) => (
+          ul: ({ children, ...props }) => (
             <ul {...props} className="list-disc list-inside space-y-1 my-2 text-foreground">
               {children}
             </ul>
           ),
-          ol: ({ children, ...props }: any) => (
+          ol: ({ children, ...props }) => (
             <ol {...props} className="list-decimal list-inside space-y-1 my-2 text-foreground">
               {children}
             </ol>
           ),
-          li: ({ children, ...props }: any) => (
+          li: ({ children, ...props }) => (
             <li {...props} className="text-foreground leading-relaxed">
               {children}
             </li>
           ),
           // Code blocks
-          code: ({ children, className, ...props }: any) => {
+          code: ({ children, className, ...props }) => {
             const isInline = !className;
             if (isInline) {
               return (
