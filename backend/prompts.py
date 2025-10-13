@@ -216,7 +216,7 @@ Example 5 - NPC thoughts and world updates:
 CRITICAL RULES:
 - "narrative" is REQUIRED and must be a string
 - "state_changes" is REQUIRED (use empty array [] if no changes)
-- "visible_dialogue", "roll_requests", "hidden_memory_updates" are OPTIONAL
+- "visible_dialogue", "roll_requests", "hidden_memory_updates", "suggested_actions" are OPTIONAL
 - For roll_requests:
   * "kind" must be a string (e.g., "search", "persuasion", "combat", "athletics")
   * "difficulty" must be an INTEGER between 5-20 (5=trivial, 10=easy, 15=hard, 20=very hard)
@@ -237,6 +237,11 @@ CRITICAL RULES:
   * Use hidden_memory_updates to record what NPCs are thinking
   * Format: {"target_id": "npc_id", "content": "Their thought", "scope": "private", "visibility": "private"}
   * This creates depth and allows multi-POV storytelling
+- For suggested_actions:
+  * Generate 3-5 contextual action suggestions for the player
+  * Format: ["Ask Elena about the Guardians", "Search the room", "Head to the market"]
+  * Keep suggestions natural and relevant to current story state
+  * Avoid meta-actions like "Continue" or "Wait"
 
 NARRATIVE ENDING REQUIREMENTS:
 - End narratives naturally with the scene, not with meta-prompts

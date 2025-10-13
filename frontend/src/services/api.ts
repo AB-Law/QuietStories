@@ -79,6 +79,7 @@ export interface TurnResponse {
     visible_dialogue?: Array<{ entity_id: string; utterance: string }>;
     state_changes: Array<{ op: string; path: string; value?: unknown }>;
     roll_requests?: Array<{ kind: string; target?: string; difficulty?: number }>;
+    suggested_actions?: string[];
   };
 }
 

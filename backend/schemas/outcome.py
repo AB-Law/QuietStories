@@ -62,6 +62,9 @@ class Outcome(BaseModel):
     hidden_memory_updates: Optional[List[HiddenMemoryUpdate]] = Field(
         None, description="Hidden memory updates"
     )
+    suggested_actions: Optional[List[str]] = Field(
+        None, description="Suggested actions for the player to take next"
+    )
 
     class Config:
         extra = "forbid"  # Reject unknown keys (additionalProperties: false)
