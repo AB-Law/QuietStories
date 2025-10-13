@@ -17,16 +17,18 @@ from langchain.schema import AIMessage, HumanMessage, SystemMessage
 from langchain_core.messages import ToolMessage
 
 from backend.engine.orchestrator import AgentState, TurnOrchestrator
-from backend.schemas.scenario import (
-    Action,
-    LossCondition,
-    NegativityBudget,
-    ScenarioSpec,
-)
+from backend.schemas.scenario import ScenarioSpec
 
 
 class TestLanggraphPerformance:
     """Performance tests for Langgraph agent implementation."""
+
+    # Performance thresholds - adjust these as needed
+    MAX_EXECUTION_TIME = 10.0  # seconds
+    MAX_MEMORY_USAGE_MB = 50  # MB
+    MIN_THROUGHPUT_OPS_PER_SEC = 1.0
+    MAX_STATE_CREATION_TIME = 0.5  # seconds
+    MAX_ROUTING_DECISION_TIME = 1.0  # seconds
 
     @pytest.fixture
     def performance_scenario(self):

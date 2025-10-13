@@ -26,13 +26,13 @@ class TestLanggraphAgentToolUsage:
         """Create a mock scenario specification for testing."""
         return ScenarioSpec(
             id="test_scenario",
-            name="Test Scenario",  # Fixed: was title, now name
-            seed=12345,  # Added required field
+            name="Test Scenario",
+            seed=12345,
             state={"location": "test_room", "time": 0},
             entities=[{"id": "player", "type": "player", "name": "Test Player"}],
             actions=[],
-            random_events=[],  # Added required field
-            loss_conditions=[  # Added required field
+            random_events=[],
+            loss_conditions=[
                 {
                     "id": "test_loss",
                     "condition": {"==": [{"var": "health"}, 0]},
@@ -44,7 +44,7 @@ class TestLanggraphAgentToolUsage:
                     "message": "Time limit exceeded",
                 },
             ],
-            negativity_budget={  # Added required field
+            negativity_budget={
                 "min_fail_rate": 0.1,
                 "decay_per_turn": {"default": 0.05},
             },
