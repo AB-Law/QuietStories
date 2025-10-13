@@ -6,7 +6,7 @@ when a new game session starts, enhancing the player's immersion.
 """
 
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from langchain.schema import HumanMessage, SystemMessage
 
@@ -41,27 +41,30 @@ class SessionInitializer:
         num_characters: int = 3,
         generate_world: bool = True,
         generate_entities: bool = True,
+        player_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Initialize a new session with generated world and entity content.
+        Initialize a new session with world background and entity backgrounds.
 
         Args:
-            spec: The scenario specification to initialize from
-            session_id: Unique identifier for this session
-            num_characters: Number of entity backgrounds to generate (default: 3)
-            generate_world: Whether to generate world background (default: True)
-            generate_entities: Whether to generate entity backgrounds (default: True)
+            spec: The scenario specification
+            session_id: Unique session identifier
+            num_characters: Maximum number of entities to generate backgrounds for
+            generate_world: Whether to generate world background
+            generate_entities: Whether to generate detailed entity backgrounds
+            player_name: Player's preferred character name for protagonist
 
         Returns:
             Dictionary containing:
-                - world_background: Narrative description of the world
-                - entities: List of entities with generated backgrounds
-                - initial_memories: Any initial memory entries
+            - world_background: Narrative world description
+            - entities: List of entities with backgrounds
+            - initial_memories: Empty list for future use
 
         Example:
             >>> initializer = SessionInitializer()
             >>> init_data = await initializer.initialize_session(
-            ...     spec, "session_123", num_characters=5, generate_world=True
+            ...     spec, "session_123", num_characters=5, generate_world=True,
+            ...     player_name="Alex"
             ... )
             >>> print(init_data['world_background'])
             "The year is 2142. Mars has been terraformed..."
@@ -91,7 +94,11 @@ class SessionInitializer:
                     f"Generating backgrounds for up to {num_characters} entities..."
                 )
                 detailed_entities = await self._generate_entity_backgrounds(
-                    spec.entities, spec, world_background, max_entities=num_characters
+                    spec.entities,
+                    spec,
+                    world_background,
+                    max_entities=num_characters,
+                    player_name=player_name,
                 )
                 logger.info(
                     f"Generated backgrounds for {len(detailed_entities)} entities"
@@ -189,6 +196,7 @@ Generate a compelling 2-4 paragraph world background:"""
         spec: ScenarioSpec,
         world_background: str,
         max_entities: int = 3,
+        player_name: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Generate detailed backgrounds for each entity.
@@ -220,11 +228,22 @@ Generate a compelling 2-4 paragraph world background:"""
                 f"Generating {max_entities - len(entities)} additional placeholder entities"
             )
             for i in range(len(entities), max_entities):
-                placeholder_entity = {
-                    "id": f"character_{i+1}",
-                    "type": "character",
-                    "name": f"Character {i+1}",
-                }
+                # Use player name for first entity if provided, otherwise generic names
+                if i == 0 and player_name:
+                    placeholder_entity = {
+                        "id": "player_character",
+                        "type": "character",
+                        "name": player_name,
+                    }
+                    logger.debug(
+                        f"Created player character entity with name: {player_name}"
+                    )
+                else:
+                    placeholder_entity = {
+                        "id": f"character_{i+1}",
+                        "type": "character",
+                        "name": f"Character {i+1}",
+                    }
                 entities_to_process.append(placeholder_entity)
 
         # Generate backgrounds for all entities up to max_entities
