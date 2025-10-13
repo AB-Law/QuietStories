@@ -9,7 +9,7 @@ This module coordinates the game loop, managing:
 """
 
 import json
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional, Union
 
 from langchain.schema import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.messages import ToolMessage
@@ -34,6 +34,10 @@ logger = get_logger(__name__)
 def _get_message_content_as_string(message: BaseMessage) -> str:
     """
     Get message content as string, handling both string and list formats.
+
+    LangChain messages can have content as either a string or a list of content blocks.
+    When content is a list, it typically contains mixed media elements (text, images, etc.).
+    This function extracts text content and converts dict elements to strings for analysis.
 
     Args:
         message: LangChain message object
@@ -164,7 +168,7 @@ class TurnOrchestrator:
         """
         self._session_ref = session_ref
 
-    def _build_graph(self):
+    def _build_graph(self) -> Any:
         """
         Build the Langgraph StateGraph for agent orchestration.
 

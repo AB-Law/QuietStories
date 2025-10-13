@@ -26,8 +26,8 @@ class TestAgentStateManagement:
         """Create a test scenario specification."""
         return ScenarioSpec(
             id="state_test",
-            name="State Management Test",  # Fixed: was title, now name
-            seed=12345,  # Added required field
+            name="State Management Test",
+            seed=12345,
             state={
                 "location": "start_room",
                 "time": 0,
@@ -39,8 +39,8 @@ class TestAgentStateManagement:
                 {"id": "npc1", "type": "npc", "name": "Merchant"},
             ],
             actions=[],
-            random_events=[],  # Added required field
-            loss_conditions=[  # Added required field
+            random_events=[],
+            loss_conditions=[
                 {
                     "id": "health_loss",
                     "condition": {"<=": [{"var": "player_health"}, 0]},
@@ -52,7 +52,7 @@ class TestAgentStateManagement:
                     "message": "Time limit exceeded",
                 },
             ],
-            negativity_budget={  # Added required field
+            negativity_budget={
                 "min_fail_rate": 0.1,
                 "decay_per_turn": {"default": 0.05},
             },
@@ -347,8 +347,8 @@ class TestStateManagementIntegration:
         """Create a comprehensive scenario for integration testing."""
         return ScenarioSpec(
             id="integration_test",
-            name="Integration Test Scenario",  # Fixed: was title, now name
-            seed=12345,  # Added required field
+            name="Integration Test Scenario",
+            seed=12345,
             state={
                 "location": "tavern",
                 "time": 1200,
@@ -363,10 +363,15 @@ class TestStateManagementIntegration:
                 {
                     "id": "player",
                     "type": "player",
-                    "name": "Adventurer",
+                    "name": "Hero",
                     "location": "tavern",
                 },
-                {"id": "bartender", "type": "npc", "name": "Tom", "location": "tavern"},
+                {
+                    "id": "bartender",
+                    "type": "npc",
+                    "name": "Friendly Bartender",
+                    "location": "tavern",
+                },
                 {
                     "id": "patron",
                     "type": "npc",
@@ -375,8 +380,8 @@ class TestStateManagementIntegration:
                 },
             ],
             actions=[],
-            random_events=[],  # Added required field
-            loss_conditions=[  # Added required field
+            random_events=[],
+            loss_conditions=[
                 {
                     "id": "health_zero",
                     "condition": {"<=": [{"var": "player.health"}, 0]},
@@ -388,7 +393,7 @@ class TestStateManagementIntegration:
                     "message": "Day ended",
                 },
             ],
-            negativity_budget={  # Added required field
+            negativity_budget={
                 "min_fail_rate": 0.15,
                 "decay_per_turn": {"default": 0.08},
             },
