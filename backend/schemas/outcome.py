@@ -46,6 +46,16 @@ class HiddenMemoryUpdate(BaseModel):
     visibility: str = Field(..., description="Visibility level")
 
 
+class EmotionalStateUpdate(BaseModel):
+    """Emotional state update for entities"""
+
+    entity_id: str = Field(..., description="Entity whose emotional state is being updated")
+    emotion: str = Field(..., description="Primary emotion (joy, sadness, anger, fear, disgust, surprise, trust, anticipation)")
+    intensity: float = Field(..., description="Emotional intensity from -1.0 to 1.0")
+    cause: Optional[str] = Field(None, description="What caused this emotional state")
+    target_entity: Optional[str] = Field(None, description="Entity this emotion is directed toward")
+
+
 class Outcome(BaseModel):
     """Turn outcome from the narrator"""
 
@@ -61,6 +71,9 @@ class Outcome(BaseModel):
     )
     hidden_memory_updates: Optional[List[HiddenMemoryUpdate]] = Field(
         None, description="Hidden memory updates"
+    )
+    emotional_state_updates: Optional[List[EmotionalStateUpdate]] = Field(
+        None, description="Emotional state updates for entities"
     )
     suggested_actions: Optional[List[str]] = Field(
         None, description="Suggested actions for the player to take next"
