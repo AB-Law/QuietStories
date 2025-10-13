@@ -35,7 +35,7 @@ export function Chat() {
   const [generateWorld, setGenerateWorld] = useState(true);
   const [generateEntityBackgrounds, setGenerateEntityBackgrounds] = useState(true);
   const { settings: localUserSettings } = useUserSettings();
-  const [userSettings, setUserSettings] = useState<{ playerName: string; preferences: Record<string, any> }>({ playerName: '', preferences: {} });
+  const [userSettings, setUserSettings] = useState<{ playerName: string; preferences: Record<string, unknown> }>({ playerName: '', preferences: {} });
   const [sidebarTab, setSidebarTab] = useState<'info' | 'relationships' | 'emotions'>('info');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);

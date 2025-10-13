@@ -2,7 +2,7 @@
  * Settings management component for user preferences
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { apiService } from '../services/api';
@@ -11,7 +11,7 @@ import { useUserSettings } from '../hooks/useLocalStorage';
 import { Save, User, AlertCircle } from 'lucide-react';
 
 interface SettingsProps {
-  onSettingsChange?: (settings: { playerName: string; preferences: Record<string, any> }) => void;
+  onSettingsChange?: (settings: { playerName: string; preferences: Record<string, unknown> }) => void;
 }
 
 export function Settings({ onSettingsChange }: SettingsProps) {
@@ -23,17 +23,7 @@ export function Settings({ onSettingsChange }: SettingsProps) {
   const [success, setSuccess] = useState(false);
   const [serverSettings, setServerSettings] = useState<UserSettings | null>(null);
 
-  // Load settings from server on component mount
-  useEffect(() => {
-    loadServerSettings();
-  }, []);
-
-  // Sync with localStorage
-  useEffect(() => {
-    setPlayerName(localSettings.playerName || '');
-  }, [localSettings.playerName]);
-
-  const loadServerSettings = async () => {
+  const loadServerSettings = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
@@ -57,7 +47,7 @@ export function Settings({ onSettingsChange }: SettingsProps) {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [localSettings.playerName, updatePlayerName]);
 
   const saveSettings = async () => {
     if (!playerName.trim()) {
@@ -116,6 +106,16 @@ export function Settings({ onSettingsChange }: SettingsProps) {
     // Update localStorage immediately for responsive UI
     updatePlayerName(value);
   };
+
+  // Load settings from server on component mount
+  useEffect(() => {
+    loadServerSettings();
+  }, [loadServerSettings]);
+
+  // Sync with localStorage
+  useEffect(() => {
+    setPlayerName(localSettings.playerName || '');
+  }, [localSettings.playerName]);
 
   if (isLoading) {
     return (

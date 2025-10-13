@@ -1,18 +1,25 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import { Badge } from './ui/Badge';
 import { Heart, Smile, Frown, AlertTriangle, Zap, Shield, Eye, Clock } from 'lucide-react';
+import type { Entity } from '../services/api';
+
+interface RecentEmotion {
+  emotion: string;
+  intensity: number;
+  turn: number;
+}
 
 interface EmotionalState {
   dominant_emotion: string;
   intensity: number;
-  recent_emotions: any[];
+  recent_emotions: RecentEmotion[];
   emotion_distribution: Record<string, { count: number; total_intensity: number }>;
 }
 
 interface EmotionalStateDisplayProps {
   sessionId: string;
-  entities: any[];
+  entities: Entity[];
   isVisible: boolean;
 }
 
@@ -20,7 +27,7 @@ export function EmotionalStateDisplay({ sessionId, entities, isVisible }: Emotio
   const [emotionalStates, setEmotionalStates] = useState<Record<string, EmotionalState>>({});
   const [isLoading, setIsLoading] = useState(false);
 
-  const loadEmotionalStates = async () => {
+  const loadEmotionalStates = useCallback(async () => {
     if (!sessionId) return;
 
     setIsLoading(true);
@@ -34,7 +41,8 @@ export function EmotionalStateDisplay({ sessionId, entities, isVisible }: Emotio
         const randomEmotion = emotions[Math.floor(Math.random() * emotions.length)];
         const intensity = Math.random() * 2 - 1; // -1 to 1
 
-        mockEmotionalStates[entity.id || entity.name] = {
+        const entityKey = entity.id || entity.name || 'unknown';
+        mockEmotionalStates[entityKey] = {
           dominant_emotion: randomEmotion,
           intensity: intensity,
           recent_emotions: [
@@ -53,13 +61,13 @@ export function EmotionalStateDisplay({ sessionId, entities, isVisible }: Emotio
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [sessionId, entities]);
 
   useEffect(() => {
     if (isVisible && sessionId && entities.length > 0) {
       loadEmotionalStates();
     }
-  }, [isVisible, sessionId, entities]);
+  }, [isVisible, sessionId, entities, loadEmotionalStates]);
 
   const getEntityName = (entityId: string) => {
     const entity = entities.find(e => e.id === entityId || e.name === entityId);
