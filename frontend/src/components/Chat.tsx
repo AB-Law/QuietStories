@@ -5,7 +5,7 @@ import { Button } from './ui/Button';
 import { apiService } from '../services/api';
 import type { Session, TurnResponse, Entity } from '../services/api';
 import { Send, Loader2, Plus, Sparkles } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import { NarrativeMarkdown } from './NarrativeMarkdown';
 import Settings from './Settings';
 import { useUserSettings } from '../hooks/useLocalStorage';
 import { RelationshipGraph } from './RelationshipGraph';
@@ -283,7 +283,7 @@ export function Chat() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] gap-4">
+    <div className="flex flex-col lg:flex-row h-[calc(100vh-4rem)] gap-2 lg:gap-4 p-2 lg:p-0">
       {/* Main Chat Area */}
       <Card className={`flex-1 flex flex-col overflow-hidden ${showSidebar && currentSession ? 'lg:w-2/3' : 'w-full'}`}>
         <CardHeader className="border-b">
@@ -298,8 +298,10 @@ export function Chat() {
                     variant="outline"
                     size="sm"
                     onClick={() => setShowSidebar(!showSidebar)}
+                    className="text-xs sm:text-sm"
                   >
-                    {showSidebar ? 'Hide Info' : 'Show Info'}
+                    <span className="hidden sm:inline">{showSidebar ? 'Hide Info' : 'Show Info'}</span>
+                    <span className="sm:hidden">{showSidebar ? 'Hide' : 'Info'}</span>
                   </Button>
                   <Button
                     variant="outline"
@@ -448,7 +450,7 @@ export function Chat() {
                   }`}
                 >
                   <div
-                    className={`max-w-[80%] rounded-lg px-4 py-2 ${
+                    className={`max-w-[95%] sm:max-w-[85%] lg:max-w-[80%] rounded-lg px-3 sm:px-4 py-2 ${
                       message.role === 'user'
                         ? 'bg-primary text-primary-foreground'
                         : message.role === 'system'
@@ -461,7 +463,9 @@ export function Chat() {
                     )}
                     {message.role === 'assistant' ? (
                       <div className="prose prose-sm max-w-none dark:prose-invert">
-                        <ReactMarkdown>{message.content}</ReactMarkdown>
+                        <NarrativeMarkdown className="text-sm leading-relaxed">
+                          {message.content}
+                        </NarrativeMarkdown>
                       </div>
                     ) : (
                       <div className="whitespace-pre-wrap">{message.content}</div>
@@ -488,7 +492,7 @@ export function Chat() {
             <div className="border-t p-3 bg-muted/30">
               <div className="text-xs font-medium text-muted-foreground mb-2">Suggested Actions:</div>
               <div className="flex flex-wrap gap-2">
-                {messages[messages.length - 1].suggestedActions.map((action: string, index: number) => (
+                {messages[messages.length - 1]?.suggestedActions?.map((action: string, index: number) => (
                   <Button
                     key={index}
                     variant="outline"
@@ -508,7 +512,7 @@ export function Chat() {
         </CardContent>
 
         {currentSession && (
-          <div className="border-t p-4">
+          <div className="border-t p-2 sm:p-4">
             <div className="flex gap-2">
               <textarea
                 ref={inputRef}
@@ -517,7 +521,7 @@ export function Chat() {
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyPress={handleKeyPress}
                 disabled={isLoading}
-                className="flex-1 min-h-[40px] max-h-[120px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none overflow-y-auto"
+                className="flex-1 min-h-[40px] max-h-[120px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none overflow-y-auto touch-manipulation"
                 rows={1}
                 style={{ height: 'auto' }}
                 onInput={(e) => {
@@ -526,7 +530,12 @@ export function Chat() {
                   target.style.height = Math.min(target.scrollHeight, 120) + 'px';
                 }}
               />
-              <Button onClick={sendMessage} disabled={isLoading || !inputValue.trim()}>
+              <Button
+                onClick={sendMessage}
+                disabled={isLoading || !inputValue.trim()}
+                size="default"
+                className="min-w-[44px] min-h-[44px] flex-shrink-0"
+              >
                 {isLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
@@ -540,7 +549,7 @@ export function Chat() {
 
       {/* Sidebar - World Info & Entities */}
       {currentSession && showSidebar && (
-        <Card className="hidden lg:block lg:w-1/3 overflow-hidden flex flex-col">
+        <Card className="w-full lg:w-1/3 mt-2 lg:mt-0 overflow-hidden flex flex-col">
           <CardHeader className="border-b">
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg">Session Info</CardTitle>
