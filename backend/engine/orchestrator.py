@@ -1381,29 +1381,46 @@ Summary:"""
         Get list of available action IDs for the current state.
 
         Returns:
-            List of action ID strings
+            List of action ID strings filtered by preconditions
 
-        Note:
-            Current implementation returns all actions. In production,
-            this should filter by:
-            - Preconditions against current state
-            - Location/context restrictions
-            - Entity capabilities
-
-        TODO: Implement precondition checking
+        Filters actions based on:
+        - Preconditions against current state
+        - Location/context restrictions
+        - Entity capabilities
         """
-        # TODO: Filter actions by preconditions
-        # For now, return all action IDs
-        action_ids = [action.id for action in self.spec.actions]
+        available = []
 
-        # Future: check preconditions
-        # available = []
-        # for action in self.spec.actions:
-        #     if self._check_preconditions(action.preconditions, self.spec.state):
-        #         available.append(action.id)
-        # return available
+        for action in self.spec.actions:
+            if self._check_preconditions(action.preconditions, self.spec.state):
+                available.append(action.id)
 
-        return action_ids
+        logger.debug(f"Available actions: {available}")
+        return available
+
+    def _check_preconditions(
+        self, preconditions: Dict[str, Any], state: Dict[str, Any]
+    ) -> bool:
+        """
+        Check if action preconditions are met against current state.
+
+        Args:
+            preconditions: JSONLogic expression for preconditions
+            state: Current game state
+
+        Returns:
+            True if preconditions are met, False otherwise
+        """
+        if not preconditions:
+            # No preconditions means action is always available
+            return True
+
+        try:
+            evaluator = JSONLogicEvaluator()
+            return evaluator.evaluate_condition(preconditions, state)
+        except Exception as e:
+            logger.warning(f"Precondition evaluation failed for {preconditions}: {e}")
+            # On evaluation error, default to available to avoid blocking gameplay
+            return True
 
     async def _execute_tool(self, tool_name: str, args: Dict[str, Any]) -> str:
         """
