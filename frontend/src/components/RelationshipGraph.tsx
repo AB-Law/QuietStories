@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
 import { apiService } from '../services/api';
-import { Network, Users, TrendingUp, Heart, Shield, Sword, BookOpen, Briefcase } from 'lucide-react';
+import { Network, Users, TrendingUp, Heart, Sword, BookOpen, Briefcase } from 'lucide-react';
 
 interface RelationshipData {
   entity_a: string;

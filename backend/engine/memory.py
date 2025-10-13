@@ -3,7 +3,7 @@ Enhanced memory management for scoped entity memory types
 """
 
 from collections import defaultdict
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from backend.engine.memory_search import SemanticMemorySearch
 from backend.utils.logger import get_logger
@@ -11,7 +11,9 @@ from backend.utils.logger import get_logger
 logger = get_logger(__name__)
 
 # Define valid memory scopes
-MemoryScope = Literal["belief", "relationship", "event", "location", "goal", "general", "emotion"]
+MemoryScope = Literal[
+    "belief", "relationship", "event", "location", "goal", "general", "emotion"
+]
 
 # Define valid memory visibility levels
 MemoryVisibility = Literal["private", "public"]
@@ -34,10 +36,8 @@ class MemoryManager:
 
         # Enhanced memory storage with scopes
         # Structure: {entity_id: {scope: {visibility: [memories]}}}
-        self.scoped_memory: Dict[
-            str, Dict[str, Dict[str, List[Dict[str, Any]]]]
-        ] = defaultdict(
-            lambda: defaultdict(lambda: defaultdict(list))  # type: ignore
+        self.scoped_memory: Dict[str, Dict[str, Dict[str, List[Dict[str, Any]]]]] = (
+            defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
         )
 
         # Legacy compatibility - flatten scoped memories for existing API
@@ -187,20 +187,24 @@ class MemoryManager:
                             for related_entity in related_entities:
                                 if related_entity != entity_id:
                                     # Calculate sentiment based on memory content
-                                    sentiment_score = self._analyze_relationship_sentiment(
-                                        memory["content"]
-                                    )
-
-                                    entity_relationships.append({
-                                        "entity_a": entity_id,
-                                        "entity_b": related_entity,
-                                        "sentiment": sentiment_score,
-                                        "memory_count": 1,
-                                        "last_interaction": memory["turn"],
-                                        "relationship_type": self._classify_relationship_type(
+                                    sentiment_score = (
+                                        self._analyze_relationship_sentiment(
                                             memory["content"]
                                         )
-                                    })
+                                    )
+
+                                    entity_relationships.append(
+                                        {
+                                            "entity_a": entity_id,
+                                            "entity_b": related_entity,
+                                            "sentiment": sentiment_score,
+                                            "memory_count": 1,
+                                            "last_interaction": memory["turn"],
+                                            "relationship_type": self._classify_relationship_type(
+                                                memory["content"]
+                                            ),
+                                        }
+                                    )
 
             # Group and summarize relationships
             for rel in entity_relationships:
@@ -210,9 +214,13 @@ class MemoryManager:
                 else:
                     # Update with most recent data
                     existing = relationships[key]
-                    existing["sentiment"] = (existing["sentiment"] + rel["sentiment"]) / 2
+                    existing["sentiment"] = (
+                        existing["sentiment"] + rel["sentiment"]
+                    ) / 2
                     existing["memory_count"] += 1
-                    existing["last_interaction"] = max(existing["last_interaction"], rel["last_interaction"])
+                    existing["last_interaction"] = max(
+                        existing["last_interaction"], rel["last_interaction"]
+                    )
 
         return relationships
 
@@ -221,8 +229,29 @@ class MemoryManager:
         content_lower = content.lower()
 
         # Positive indicators
-        positive_words = ["love", "friend", "trust", "respect", "care", "help", "support", "loyal", "close", "bond"]
-        negative_words = ["hate", "enemy", "distrust", "betray", "anger", "fear", "avoid", "conflict", "tension"]
+        positive_words = [
+            "love",
+            "friend",
+            "trust",
+            "respect",
+            "care",
+            "help",
+            "support",
+            "loyal",
+            "close",
+            "bond",
+        ]
+        negative_words = [
+            "hate",
+            "enemy",
+            "distrust",
+            "betray",
+            "anger",
+            "fear",
+            "avoid",
+            "conflict",
+            "tension",
+        ]
 
         positive_score = sum(1 for word in positive_words if word in content_lower)
         negative_score = sum(1 for word in negative_words if word in content_lower)
@@ -238,17 +267,31 @@ class MemoryManager:
         """Classify the type of relationship based on memory content"""
         content_lower = content.lower()
 
-        if any(word in content_lower for word in ["family", "sibling", "parent", "child", "blood"]):
+        if any(
+            word in content_lower
+            for word in ["family", "sibling", "parent", "child", "blood"]
+        ):
             return "family"
-        elif any(word in content_lower for word in ["friend", "companion", "ally", "trust"]):
+        elif any(
+            word in content_lower for word in ["friend", "companion", "ally", "trust"]
+        ):
             return "friendship"
-        elif any(word in content_lower for word in ["romantic", "love", "partner", "spouse"]):
+        elif any(
+            word in content_lower for word in ["romantic", "love", "partner", "spouse"]
+        ):
             return "romantic"
-        elif any(word in content_lower for word in ["enemy", "rival", "opponent", "foe"]):
+        elif any(
+            word in content_lower for word in ["enemy", "rival", "opponent", "foe"]
+        ):
             return "adversarial"
-        elif any(word in content_lower for word in ["mentor", "teacher", "student", "guide"]):
+        elif any(
+            word in content_lower for word in ["mentor", "teacher", "student", "guide"]
+        ):
             return "mentor"
-        elif any(word in content_lower for word in ["boss", "employee", "subordinate", "leader"]):
+        elif any(
+            word in content_lower
+            for word in ["boss", "employee", "subordinate", "leader"]
+        ):
             return "professional"
         else:
             return "acquaintance"
@@ -263,7 +306,16 @@ class MemoryManager:
     ):
         """Update emotional state for an entity"""
         # Validate emotion
-        valid_emotions = ["joy", "sadness", "anger", "fear", "disgust", "surprise", "trust", "anticipation"]
+        valid_emotions = [
+            "joy",
+            "sadness",
+            "anger",
+            "fear",
+            "disgust",
+            "surprise",
+            "trust",
+            "anticipation",
+        ]
         if emotion not in valid_emotions:
             logger.warning(f"Invalid emotion: {emotion}. Using 'neutral' instead.")
             emotion = "neutral"
@@ -290,23 +342,35 @@ class MemoryManager:
         if target_entity:
             emotion_summary += f" towards {target_entity}"
 
-        self.private_memory[entity_id].append({
-            "content": emotion_summary,
-            "scope": "emotion",
-            "turn": self.turn_count
-        })
+        self.private_memory[entity_id].append(
+            {"content": emotion_summary, "scope": "emotion", "turn": self.turn_count}
+        )
 
-        logger.debug(f"Updated emotional state for {entity_id}: {emotion} ({intensity:.2f})")
+        logger.debug(
+            f"Updated emotional state for {entity_id}: {emotion} ({intensity:.2f})"
+        )
 
-    def get_emotional_state(self, entity_id: str, recent_turns: int = 10) -> Dict[str, Any]:
+    def get_emotional_state(
+        self, entity_id: str, recent_turns: int = 10
+    ) -> Dict[str, Any]:
         """Get current emotional state for an entity"""
         if entity_id not in self.scoped_memory:
-            return {"dominant_emotion": "neutral", "intensity": 0.0, "recent_emotions": []}
+            return {
+                "dominant_emotion": "neutral",
+                "intensity": 0.0,
+                "recent_emotions": [],
+            }
 
-        emotion_memories = self.get_scoped_memory(entity_id, scope="emotion", limit=recent_turns)
+        emotion_memories = self.get_scoped_memory(
+            entity_id, scope="emotion", limit=recent_turns
+        )
 
         if not emotion_memories:
-            return {"dominant_emotion": "neutral", "intensity": 0.0, "recent_emotions": []}
+            return {
+                "dominant_emotion": "neutral",
+                "intensity": 0.0,
+                "recent_emotions": [],
+            }
 
         # Calculate dominant emotion and average intensity
         emotion_counts = {}
@@ -324,11 +388,15 @@ class MemoryManager:
             total_intensity += abs(intensity)
 
         if not emotion_counts:
-            return {"dominant_emotion": "neutral", "intensity": 0.0, "recent_emotions": []}
+            return {
+                "dominant_emotion": "neutral",
+                "intensity": 0.0,
+                "recent_emotions": [],
+            }
 
         # Find dominant emotion (most frequent and intense)
         dominant_emotion = "neutral"
-        max_score = 0
+        max_score = 0.0
 
         for emotion, data in emotion_counts.items():
             # Score combines frequency and intensity
@@ -338,13 +406,16 @@ class MemoryManager:
                 max_score = score
                 dominant_emotion = emotion
 
-        avg_intensity = emotion_counts[dominant_emotion]["total_intensity"] / emotion_counts[dominant_emotion]["count"]
+        final_intensity: float = (
+            emotion_counts[dominant_emotion]["total_intensity"]
+            / emotion_counts[dominant_emotion]["count"]
+        )
 
         return {
             "dominant_emotion": dominant_emotion,
-            "intensity": avg_intensity,
+            "intensity": final_intensity,
             "recent_emotions": emotion_memories[:5],  # Last 5 emotional states
-            "emotion_distribution": emotion_counts
+            "emotion_distribution": emotion_counts,
         }
 
     def get_emotional_summary(self) -> Dict[str, Dict[str, Any]]:
@@ -356,7 +427,9 @@ class MemoryManager:
 
         return summary
 
-    def consolidate_memories(self, max_memories_per_entity: int = 50, consolidation_threshold: int = 10) -> Dict[str, Any]:
+    def consolidate_memories(
+        self, max_memories_per_entity: int = 50, consolidation_threshold: int = 10
+    ) -> Dict[str, Any]:
         """
         Consolidate memories by summarizing and merging similar memories.
 
@@ -372,12 +445,12 @@ class MemoryManager:
         Returns:
             Summary of consolidation actions taken
         """
-        consolidation_summary = {
+        consolidation_summary: Dict[str, Any] = {
             "entities_processed": 0,
             "memories_removed": 0,
             "memories_merged": 0,
             "memories_summarized": 0,
-            "entities_consolidated": []
+            "entities_consolidated": [],
         }
 
         for entity_id in self.scoped_memory:
@@ -394,8 +467,11 @@ class MemoryManager:
                             # Sort by importance and turn (most recent/important first)
                             sorted_memories = sorted(
                                 valid_memories,
-                                key=lambda m: (m.get("importance", 5), m.get("turn", 0)),
-                                reverse=True
+                                key=lambda m: (
+                                    m.get("importance", 5),
+                                    m.get("turn", 0),
+                                ),
+                                reverse=True,
                             )
 
                             # Keep only the most important memories
@@ -404,15 +480,25 @@ class MemoryManager:
 
                             if removed_count > 0:
                                 # Replace with consolidated memories
-                                self.scoped_memory[entity_id][scope][visibility] = kept_memories
-                                consolidation_summary["memories_removed"] += removed_count
+                                self.scoped_memory[entity_id][scope][
+                                    visibility
+                                ] = kept_memories
+                                consolidation_summary[
+                                    "memories_removed"
+                                ] += removed_count
                                 entity_consolidated = True
 
                                 # Update legacy format as well
                                 if visibility == "private":
                                     self.private_memory[entity_id] = [
-                                        {"content": m["content"], "scope": m["scope"], "turn": m["turn"]}
-                                        for m in kept_memories if m.get("scope") != "emotion"  # Skip emotion memories for legacy compatibility
+                                        {
+                                            "content": m["content"],
+                                            "scope": m["scope"],
+                                            "turn": m["turn"],
+                                        }
+                                        for m in kept_memories
+                                        if m.get("scope")
+                                        != "emotion"  # Skip emotion memories for legacy compatibility
                                     ]
                                 else:
                                     self.public_memory[entity_id] = [
@@ -427,7 +513,9 @@ class MemoryManager:
         logger.info(f"Memory consolidation completed: {consolidation_summary}")
         return consolidation_summary
 
-    def summarize_entity_memories(self, entity_id: str, scope: Optional[str] = None) -> str:
+    def summarize_entity_memories(
+        self, entity_id: str, scope: Optional[str] = None
+    ) -> str:
         """
         Generate a summary of an entity's memories for context building.
 
@@ -457,7 +545,7 @@ class MemoryManager:
                 sorted_memories = sorted(
                     memory_list,
                     key=lambda m: (m["importance"], m["turn"]),
-                    reverse=True
+                    reverse=True,
                 )
                 scope_memories.extend(sorted_memories[:5])  # Top 5 memories per scope
 
@@ -469,7 +557,11 @@ class MemoryManager:
                     summary_text = f"{scope_name.title()}: {'; '.join(memory_texts)}"
                     summary_parts.append(summary_text)
 
-        return " | ".join(summary_parts) if summary_parts else f"No significant memories in {scope or 'any scope'} for {entity_id}"
+        return (
+            " | ".join(summary_parts)
+            if summary_parts
+            else f"No significant memories in {scope or 'any scope'} for {entity_id}"
+        )
 
     def get_memory_statistics(self) -> Dict[str, Any]:
         """
@@ -478,13 +570,13 @@ class MemoryManager:
         Returns:
             Dictionary with memory statistics
         """
-        stats = {
+        stats: Dict[str, Any] = {
             "total_entities": len(self.scoped_memory),
             "total_memories": 0,
             "memory_distribution": {},
-            "oldest_memory_turn": float('inf'),
+            "oldest_memory_turn": float("inf"),
             "newest_memory_turn": 0,
-            "average_importance": 0.0
+            "average_importance": 0.0,
         }
 
         all_importances = []
@@ -506,22 +598,27 @@ class MemoryManager:
                     for memory in memories:
                         if isinstance(memory, dict):
                             turn = memory.get("turn", 0)
-                            stats["oldest_memory_turn"] = min(stats["oldest_memory_turn"], turn)
-                            stats["newest_memory_turn"] = max(stats["newest_memory_turn"], turn)
+                            stats["oldest_memory_turn"] = min(
+                                stats["oldest_memory_turn"], turn
+                            )
+                            stats["newest_memory_turn"] = max(
+                                stats["newest_memory_turn"], turn
+                            )
                             all_importances.append(memory.get("importance", 5))
 
             if entity_memory_count > 0:
                 # Track entities with most memories
                 if "largest_entities" not in stats:
                     stats["largest_entities"] = []
-                stats["largest_entities"].append({
-                    "entity_id": entity_id,
-                    "memory_count": entity_memory_count
-                })
+                stats["largest_entities"].append(
+                    {"entity_id": entity_id, "memory_count": entity_memory_count}
+                )
 
         # Sort largest entities
         if "largest_entities" in stats:
-            stats["largest_entities"].sort(key=lambda x: x["memory_count"], reverse=True)
+            stats["largest_entities"].sort(
+                key=lambda x: x["memory_count"], reverse=True
+            )
             stats["largest_entities"] = stats["largest_entities"][:10]  # Top 10
 
         # Calculate average importance
