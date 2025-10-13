@@ -14,6 +14,7 @@ interface Message {
   content: string;
   timestamp: Date;
   turnNumber?: number;
+  suggestedActions?: string[];
 }
 
 export function Chat() {
@@ -229,6 +230,7 @@ export function Chat() {
         content: response.outcome.narrative,
         timestamp: new Date(),
         turnNumber: response.turn,
+        suggestedActions: response.outcome.suggested_actions,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -468,6 +470,29 @@ export function Chat() {
                 </div>
               )}
               <div ref={messagesEndRef} />
+            </div>
+          )}
+
+          {/* Suggested Actions */}
+          {currentSession && messages.length > 0 && messages[messages.length - 1]?.suggestedActions && (
+            <div className="border-t p-3 bg-muted/30">
+              <div className="text-xs font-medium text-muted-foreground mb-2">Suggested Actions:</div>
+              <div className="flex flex-wrap gap-2">
+                {messages[messages.length - 1].suggestedActions.map((action: string, index: number) => (
+                  <Button
+                    key={index}
+                    variant="outline"
+                    size="sm"
+                    className="text-xs h-7"
+                    onClick={() => {
+                      setInputValue(action);
+                      setTimeout(() => inputRef.current?.focus(), 100);
+                    }}
+                  >
+                    {action}
+                  </Button>
+                ))}
+              </div>
             </div>
           )}
         </CardContent>
