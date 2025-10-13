@@ -227,14 +227,27 @@ Generate a compelling 2-4 paragraph world background:"""
             logger.debug(
                 f"Generating {max_entities - len(entities)} additional placeholder entities"
             )
+
+            # Check if we already have a player character in existing entities
+            has_player_character = any(
+                entity.get("id") == "player_character" or entity.get("type") == "player"
+                for entity in entities
+            )
+
+            player_character_created = False
             for i in range(len(entities), max_entities):
-                # Use player name for first entity if provided, otherwise generic names
-                if i == 0 and player_name:
+                # Create player character if we have a player name and haven't created one yet
+                if (
+                    player_name
+                    and not has_player_character
+                    and not player_character_created
+                ):
                     placeholder_entity = {
                         "id": "player_character",
                         "type": "character",
                         "name": player_name,
                     }
+                    player_character_created = True
                     logger.debug(
                         f"Created player character entity with name: {player_name}"
                     )
