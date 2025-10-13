@@ -11,6 +11,7 @@ sse-starlette
 langchain
 langchain-openai
 langchain-community
+langgraph
 
 # JSON processing
 jsonschema

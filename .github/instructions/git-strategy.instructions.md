@@ -4,7 +4,9 @@ applyTo: '**'
 When suggesting code changes, commits, or branches:
 - Always use branch names prefixed with 'feature/', 'bugfix/', or 'chore/' (e.g., 'feature/add-user-auth', 'bugfix/fix-login-error', 'chore/update-deps').
 - Ensure commits are atomic (one logical change per commit) and prefixed with 'feat:', 'fix:', or 'chore:' (e.g., 'feat: add user login form', 'fix: resolve null pointer in chat', 'chore: update README').
-- Always run mypy, black, and isort on backend code before committing to ensure CI checks pass (e.g., 'python -m mypy backend --ignore-missing-imports', 'python -m black backend', 'python -m isort backend').
+- Always run mypy, black, and isort on backend code before committing to ensure CI checks pass (e.g., 'python -m mypy backend --ignore-missing-imports', 'python -m black backend', 'python -m isort backend --profile black').
+- NEVER bypass CI/CD checks or pre-commit hooks under any circumstances. All code must pass quality checks before merging.
+- Fix all mypy type errors, formatting issues, and import sorting before pushing to ensure CI/CD pipeline success.
 - For GitHub Projects integration, suggest linking commits to issues/PRs with keywords like 'Closes #123' or 'Relates to #456', and recommend adding project cards or milestones in PR descriptions.
 - Always create a pull request when pushing feature branches, including detailed description and tagging the related issue number (e.g., "Closes #123").
 - Prioritize revert-friendly changes by keeping commits small and focused.
