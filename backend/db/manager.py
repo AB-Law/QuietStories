@@ -13,7 +13,7 @@ from sqlalchemy import create_engine, desc
 from sqlalchemy.orm import Session as DBSession
 from sqlalchemy.orm import sessionmaker
 
-from backend.db.schema import Base, Scenario, Session
+from backend.db.schema import Base, Scenario, Session, UserSettings
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -434,6 +434,122 @@ class DatabaseManager:
         except Exception as e:
             db.rollback()
             logger.error(f"Failed to delete session: {e}")
+            raise
+        finally:
+            db.close()
+
+    # ==================== UserSettings Operations ====================
+
+    def save_user_settings(self, settings_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Save user settings to the database.
+
+        Args:
+            settings_dict: Dictionary containing settings data with keys:
+                - id: Settings ID (optional, will be generated if not provided)
+                - player_name: User's preferred player character name
+                - preferences: Additional user preferences as dict (optional)
+
+        Returns:
+            Dictionary with saved settings data
+
+        Raises:
+            ValueError: If required fields are missing
+        """
+        db: DBSession = self.SessionLocal()
+        try:
+            # Check if settings exist (assume single user for now)
+            existing = db.query(UserSettings).first()
+
+            if existing:
+                # Update existing
+                existing.player_name = settings_dict["player_name"]
+                existing.preferences = settings_dict.get("preferences", {})
+                existing.updated_at = datetime.utcnow()  # type: ignore
+                settings = existing
+            else:
+                # Create new
+                settings = UserSettings(
+                    player_name=settings_dict["player_name"],
+                    preferences=settings_dict.get("preferences", {}),
+                    created_at=datetime.utcnow(),
+                )
+                db.add(settings)
+
+            db.commit()
+
+            result = {
+                "id": settings.id,
+                "player_name": settings.player_name,
+                "preferences": settings.preferences,
+                "created_at": (
+                    settings.created_at.isoformat() if settings.created_at else None
+                ),
+                "updated_at": (
+                    settings.updated_at.isoformat() if settings.updated_at else None
+                ),
+            }
+
+            logger.debug(f"Saved user settings for player: {result['player_name']}")
+            return result
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to save user settings: {e}")
+            raise
+        finally:
+            db.close()
+
+    def get_user_settings(self) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve user settings from the database.
+
+        Returns:
+            Dictionary containing settings data, or None if not found
+        """
+        db: DBSession = self.SessionLocal()
+        try:
+            settings = db.query(UserSettings).first()
+            if settings:
+                return {
+                    "id": settings.id,
+                    "player_name": settings.player_name,
+                    "preferences": settings.preferences,
+                    "created_at": (
+                        settings.created_at.isoformat() if settings.created_at else None
+                    ),
+                    "updated_at": (
+                        settings.updated_at.isoformat() if settings.updated_at else None
+                    ),
+                }
+            return None
+        finally:
+            db.close()
+
+    def update_user_settings(self, updates: Dict[str, Any]) -> bool:
+        """
+        Update user settings fields.
+
+        Args:
+            updates: Dictionary of fields to update
+
+        Returns:
+            True if updated successfully, False if not found
+        """
+        db: DBSession = self.SessionLocal()
+        try:
+            settings = db.query(UserSettings).first()
+            if settings:
+                for key, value in updates.items():
+                    if hasattr(settings, key) and key not in ["id", "created_at"]:
+                        setattr(settings, key, value)  # type: ignore
+                settings.updated_at = datetime.utcnow()  # type: ignore
+                db.commit()
+                logger.debug(f"Updated user settings: {list(updates.keys())}")
+                return True
+            return False
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to update user settings: {e}")
             raise
         finally:
             db.close()
