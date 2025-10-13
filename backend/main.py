@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.api.prompts import router as prompts_router
 from backend.api.scenarios import router as scenarios_router
 from backend.api.sessions import router as sessions_router
+from backend.api.settings import router as settings_router
 from backend.config import settings
 from backend.utils.logger import LogLevel, get_logger, setup_logging
 
@@ -52,6 +53,7 @@ app.add_middleware(
 app.include_router(scenarios_router, prefix="/scenarios", tags=["scenarios"])
 app.include_router(sessions_router, prefix="/sessions", tags=["sessions"])
 app.include_router(prompts_router, prefix="/prompts", tags=["prompts"])
+app.include_router(settings_router, prefix="/settings", tags=["settings"])
 
 
 @app.on_event("startup")
