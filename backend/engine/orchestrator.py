@@ -9,6 +9,7 @@ This module coordinates the game loop, managing:
 """
 
 import json
+import random
 from typing import Annotated, Any, Dict, List, Optional, Union
 
 from langchain.schema import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -25,6 +26,7 @@ from backend.engine.memory import MemoryManager
 from backend.prompts import NARRATOR_SYSTEM, NARRATOR_USER
 from backend.providers import create_provider
 from backend.schemas import Outcome, ScenarioSpec
+from backend.schemas.outcome import RollRequest
 from backend.utils.jsonlogic import JSONLogicEvaluator
 from backend.utils.logger import get_logger
 
@@ -1421,6 +1423,98 @@ Summary:"""
             logger.warning(f"Precondition evaluation failed for {preconditions}: {e}")
             # On evaluation error, default to available to avoid blocking gameplay
             return True
+
+    def _resolve_roll_request(self, roll_request: RollRequest) -> Dict[str, Any]:
+        """
+        Resolve a roll request with d20 mechanics and character stats.
+
+        Args:
+            roll_request: The roll request from the LLM
+
+        Returns:
+            Dictionary with roll result, success/failure, and narrative context
+        """
+        # Get character stats if target is specified
+        character_stats = self._get_character_stats(roll_request.target)
+
+        # Roll d20
+        roll = random.randint(1, 20)
+
+        # Add relevant modifiers based on roll type
+        modifier = self._get_roll_modifier(roll_request.kind, character_stats)
+
+        total = roll + modifier
+
+        # Determine success/failure
+        success = total >= roll_request.difficulty
+        margin = abs(total - roll_request.difficulty)
+
+        return {
+            "roll": roll,
+            "modifier": modifier,
+            "total": total,
+            "success": success,
+            "margin": margin,
+            "difficulty": roll_request.difficulty,
+            "character_stats": character_stats,
+            "narrative_context": self._generate_roll_narrative(
+                roll_request, roll, total, success
+            ),
+        }
+
+    def _get_character_stats(self, entity_id: Optional[str]) -> Dict[str, Any]:
+        """Get character stats for roll modifiers"""
+        if not entity_id:
+            return {"modifier": 0}
+
+        # Look for character in entities
+        for entity in self.spec.entities:
+            if entity.get("id") == entity_id:
+                stats = entity.get("stats", {})
+                return {
+                    "modifier": stats.get("persuasion_modifier", 0),
+                    "strength": stats.get("strength", 10),
+                    "dexterity": stats.get("dexterity", 10),
+                    "intelligence": stats.get("intelligence", 10),
+                    "charisma": stats.get("charisma", 10),
+                }
+
+        return {"modifier": 0}
+
+    def _get_roll_modifier(
+        self, roll_kind: str, character_stats: Dict[str, Any]
+    ) -> int:
+        """Get appropriate modifier based on roll type and character stats"""
+        base_modifier = character_stats.get("modifier", 0)
+
+        # Apply specific modifiers based on roll type
+        if roll_kind in ["persuasion", "diplomacy", "charm"]:
+            return base_modifier + (character_stats.get("charisma", 10) - 10) // 2
+        elif roll_kind in ["athletics", "climb", "swim"]:
+            return base_modifier + (character_stats.get("strength", 10) - 10) // 2
+        elif roll_kind in ["stealth", "sleight_of_hand", "acrobatics"]:
+            return base_modifier + (character_stats.get("dexterity", 10) - 10) // 2
+        elif roll_kind in ["investigation", "arcana", "history", "nature", "religion"]:
+            return base_modifier + (character_stats.get("intelligence", 10) - 10) // 2
+        else:
+            # Default modifier for other roll types
+            return base_modifier
+
+    def _generate_roll_narrative(
+        self, roll_request: RollRequest, roll: int, total: int, success: bool
+    ) -> str:
+        """Generate narrative context for roll results"""
+        if success:
+            if total >= roll_request.difficulty + 5:
+                return f"You succeed spectacularly! (rolled {roll} + {total - roll} modifier = {total} vs DC {roll_request.difficulty})"
+            else:
+                return f"You succeed. (rolled {roll} + {total - roll} modifier = {total} vs DC {roll_request.difficulty})"
+        else:
+            margin = roll_request.difficulty - total
+            if margin >= 5:
+                return f"You fail catastrophically! (rolled {roll} + {total - roll} modifier = {total} vs DC {roll_request.difficulty})"
+            else:
+                return f"You fail. (rolled {roll} + {total - roll} modifier = {total} vs DC {roll_request.difficulty})"
 
     async def _execute_tool(self, tool_name: str, args: Dict[str, Any]) -> str:
         """
