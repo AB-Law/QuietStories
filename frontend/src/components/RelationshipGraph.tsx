@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
 import { apiService } from '../services/api';
 import { Network, Users, TrendingUp, Heart, Sword, BookOpen, Briefcase } from 'lucide-react';
+import type { Entity } from '../services/api';
 
 interface RelationshipData {
   entity_a: string;
@@ -16,7 +17,7 @@ interface RelationshipData {
 
 interface RelationshipGraphProps {
   sessionId: string;
-  entities: any[];
+  entities: Entity[];
   isVisible: boolean;
 }
 
@@ -25,7 +26,7 @@ export function RelationshipGraph({ sessionId, entities, isVisible }: Relationsh
   const [isLoading, setIsLoading] = useState(false);
   const [selectedRelationship, setSelectedRelationship] = useState<string | null>(null);
 
-  const loadRelationships = async () => {
+  const loadRelationships = useCallback(async () => {
     if (!sessionId) return;
 
     setIsLoading(true);
@@ -37,13 +38,13 @@ export function RelationshipGraph({ sessionId, entities, isVisible }: Relationsh
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [sessionId]);
 
   useEffect(() => {
     if (isVisible && sessionId) {
       loadRelationships();
     }
-  }, [isVisible, sessionId]);
+  }, [isVisible, sessionId, loadRelationships]);
 
   const getEntityName = (entityId: string) => {
     const entity = entities.find(e => e.id === entityId || e.name === entityId);

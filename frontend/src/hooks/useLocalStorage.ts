@@ -96,7 +96,7 @@ export function useUserSettings() {
     setSettings(prev => ({ ...prev, playerName }));
   }, [setSettings]);
 
-  const updatePreferences = useCallback((preferences: Record<string, any>) => {
+  const updatePreferences = useCallback((preferences: Record<string, unknown>) => {
     setSettings(prev => ({ ...prev, preferences }));
   }, [setSettings]);
 
