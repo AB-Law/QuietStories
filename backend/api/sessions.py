@@ -21,6 +21,7 @@ from backend.engine.initializer import SessionInitializer
 from backend.engine.orchestrator import TurnOrchestrator
 from backend.schemas import Outcome, ScenarioSpec
 from backend.utils.logger import get_logger
+from backend.utils.cache import memory_cache, invalidate_session_cache, get_cache_statistics
 
 # Set up logging
 logger = get_logger(__name__)
@@ -398,6 +399,9 @@ async def process_turn(session_id: str, request: SessionTurnRequest):
         logger.info(f"Turn completed. New turn count: {new_turn}")
         logger.info(f"Turn history now has {len(turn_history)} entries")
 
+        # Invalidate caches since session data has changed
+        invalidate_session_cache(session_id)
+
         return {"session_id": session_id, "turn": new_turn, "outcome": outcome.dict()}
 
     except Exception as e:
@@ -616,6 +620,80 @@ async def get_session(session_id: str):
     return session
 
 
+@router.get("/{session_id}/relationships")
+async def get_relationships(session_id: str):
+    """
+    Get relationship data for all entities in a session.
+
+    Returns relationship analysis including:
+    - Sentiment scores between entities
+    - Relationship types
+    - Interaction frequency
+
+    Args:
+        session_id: Session identifier
+
+    Returns:
+        Dictionary with relationship data
+
+    Raises:
+        HTTPException 404: Session not found
+    """
+    logger.debug(f"Retrieving relationships for session: {session_id}")
+
+    # Check cache first
+    cached_data = memory_cache.get_relationships(session_id)
+    if cached_data:
+        logger.debug(f"Returning cached relationships for session: {session_id}")
+        return cached_data
+
+    session = db.get_session(session_id)
+    if not session:
+        logger.warning(f"Session not found: {session_id}")
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Get orchestrator to access memory system
+    if session_id not in orchestrators_db:
+        # Create temporary orchestrator just to access memory
+        from backend.engine.orchestrator import TurnOrchestrator
+        from backend.schemas import ScenarioSpec
+        import json
+
+        spec = ScenarioSpec(**session["scenario_spec"])
+        temp_orchestrator = TurnOrchestrator(spec, session_id, db)
+        orchestrators_db[session_id] = temp_orchestrator
+
+    orchestrator = orchestrators_db[session_id]
+
+    # Get relationship summary from memory system
+    relationship_summary = orchestrator.memory.get_relationship_summary()
+
+    # Convert tuple keys back to readable format
+    formatted_relationships = {}
+    for key_tuple, rel_data in relationship_summary.items():
+        key = f"{rel_data['entity_a']}_{rel_data['entity_b']}"
+        formatted_relationships[key] = {
+            "entity_a": rel_data["entity_a"],
+            "entity_b": rel_data["entity_b"],
+            "sentiment": rel_data["sentiment"],
+            "relationship_type": rel_data["relationship_type"],
+            "memory_count": rel_data["memory_count"],
+            "last_interaction": rel_data["last_interaction"]
+        }
+
+    result = {
+        "session_id": session_id,
+        "relationships": formatted_relationships,
+        "entity_count": len(session.get("entities", [])),
+        "total_relationships": len(formatted_relationships)
+    }
+
+    # Cache the result
+    memory_cache.set_relationships(session_id, result)
+
+    return result
+
+
 @router.get("/")
 async def list_sessions():
     """
@@ -677,3 +755,24 @@ async def get_session_memories(session_id: str):
     logger.debug(f"Public memory keys: {list(public_memory.keys())}")
 
     return {"private_memory": private_memory, "public_memory": public_memory}
+
+
+@router.get("/cache/stats")
+async def get_cache_stats():
+    """
+    Get cache performance statistics.
+
+    Returns cache hit rates, sizes, and other performance metrics
+    for monitoring and optimization.
+
+    Returns:
+        Dictionary with cache statistics
+    """
+    logger.debug("Retrieving cache statistics")
+
+    stats = get_cache_statistics()
+
+    return {
+        "cache_stats": stats,
+        "timestamp": datetime.now().isoformat()
+    }

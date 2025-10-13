@@ -107,6 +107,22 @@ export interface MemoryData {
   public_memory: Record<string, Memory[]>;
 }
 
+export interface RelationshipData {
+  entity_a: string;
+  entity_b: string;
+  sentiment: number;
+  relationship_type: string;
+  memory_count: number;
+  last_interaction: number;
+}
+
+export interface RelationshipsResponse {
+  session_id: string;
+  relationships: Record<string, RelationshipData>;
+  entity_count: number;
+  total_relationships: number;
+}
+
 export interface PromptEnrichRequest {
   description: string;
   max_tokens?: number;
@@ -242,6 +258,16 @@ class ApiService {
 
     if (!response.ok) {
       throw new Error(`Failed to get session memories: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  async getRelationships(sessionId: string): Promise<RelationshipsResponse> {
+    const response = await fetch(`${this.baseUrl}/sessions/${sessionId}/relationships`);
+
+    if (!response.ok) {
+      throw new Error(`Failed to get relationships: ${response.statusText}`);
     }
 
     return response.json();

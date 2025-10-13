@@ -38,6 +38,9 @@ class ScenarioCompiler:
         # Add memory tool
         self.tools.append(self._create_memory_tool())
 
+        # Add semantic search tool
+        self.tools.append(self._create_semantic_search_tool())
+
     def _create_read_state_tool(self) -> BaseTool:
         """Create tool for reading game state"""
 
@@ -284,6 +287,76 @@ class ScenarioCompiler:
                 return self._run(entity_id, content, visibility)
 
         tool = AddMemoryTool()
+        tool._compiler = self  # type: ignore
+        return tool
+
+    def _create_semantic_search_tool(self) -> BaseTool:
+        """Create tool for semantic memory search"""
+
+        class SemanticSearchTool(BaseTool):
+            name: str = "search_memories"
+            description: str = (
+                "Search memories using semantic similarity. Query by meaning rather than exact keywords. "
+                "Args: query (required), entity_id (optional), scope (optional), limit (optional, default 5), threshold (optional, default 0.1)"
+            )
+
+            def _run(
+                self,
+                query: str,
+                entity_id: Optional[str] = None,
+                scope: Optional[str] = None,
+                limit: int = 5,
+                threshold: float = 0.1
+            ) -> str:
+                """Search memories semantically"""
+                try:
+                    compiler = getattr(self, "_compiler", None)
+                    if not compiler or not hasattr(compiler, "_orchestrator"):
+                        return "Error: No orchestrator available"
+
+                    orchestrator = compiler._orchestrator
+
+                    # Search memories
+                    results = orchestrator.memory.search_memories_semantic(
+                        query=query,
+                        entity_id=entity_id,
+                        scope=scope,
+                        limit=limit,
+                        threshold=threshold
+                    )
+
+                    if not results:
+                        return f"No memories found for query: {query}"
+
+                    # Format results
+                    result_lines = [f"Found {len(results)} relevant memories for '{query}':"]
+                    for i, result in enumerate(results, 1):
+                        similarity = result.get("similarity", 0)
+                        content = result.get("content", "")
+                        metadata = result.get("metadata", {})
+
+                        result_lines.append(
+                            f"{i}. [{metadata.get('scope', 'unknown')}] {content[:100]}{'...' if len(content) > 100 else ''} "
+                            f"(similarity: {similarity:.3f}, entity: {metadata.get('entity_id', 'unknown')})"
+                        )
+
+                    return "\n".join(result_lines)
+
+                except Exception as e:
+                    return f"Error searching memories: {e}"
+
+            async def _arun(
+                self,
+                query: str,
+                entity_id: Optional[str] = None,
+                scope: Optional[str] = None,
+                limit: int = 5,
+                threshold: float = 0.1
+            ) -> str:
+                """Async version of _run"""
+                return self._run(query, entity_id, scope, limit, threshold)
+
+        tool = SemanticSearchTool()
         tool._compiler = self  # type: ignore
         return tool
 

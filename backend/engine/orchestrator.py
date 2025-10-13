@@ -922,9 +922,43 @@ What memories should be recorded from this turn?"""
             )
             self._apply_state_changes(outcome.state_changes)
 
+        # Process memory updates
+        if outcome.hidden_memory_updates:
+            logger.info(
+                f"[Orchestrator] Processing {len(outcome.hidden_memory_updates)} memory updates..."
+            )
+            self._update_memory(outcome.hidden_memory_updates)
+
+        # Process emotional state updates
+        if outcome.emotional_state_updates:
+            logger.info(
+                f"[Orchestrator] Processing {len(outcome.emotional_state_updates)} emotional state updates..."
+            )
+            self._update_emotional_states(outcome.emotional_state_updates)
+
         # Increment turn counter
         self.memory.increment_turn()
         logger.info(f"[Orchestrator] ✅ Turn completed: {self.memory.get_turn_count()}")
+
+        # Periodic memory consolidation (every 10 turns or when memory gets large)
+        turn_count = self.memory.get_turn_count()
+        memory_stats = self.memory.get_memory_statistics()
+
+        # Trigger consolidation if:
+        # 1. Every 10 turns, OR
+        # 2. Total memories exceed 200, OR
+        # 3. Any entity has more than 30 memories
+        should_consolidate = (
+            turn_count % 10 == 0 or
+            memory_stats["total_memories"] > 200 or
+            any(entity["memory_count"] > 30 for entity in memory_stats.get("largest_entities", []))
+        )
+
+        if should_consolidate:
+            logger.info(f"[Orchestrator] Triggering memory consolidation (turn {turn_count})")
+            consolidation_result = self.consolidate_session_memories()
+            if consolidation_result["memories_removed"] > 0:
+                logger.info(f"[Orchestrator] Consolidated {consolidation_result['memories_removed']} memories")
 
         # Save memory to database
         self.memory.save_to_database()
@@ -1457,6 +1491,85 @@ Summary:"""
                     f"Unknown visibility '{visibility}', treating as private"
                 )
                 self.memory.update_private_memory(target_id, content, scope)
+
+    def _update_emotional_states(self, emotional_updates: List[Any]):
+        """
+        Process emotional state updates from the narrator's Outcome.
+
+        Args:
+            emotional_updates: List of emotional state update objects or dicts from Outcome
+
+        Note:
+            Processes emotional_state_updates from the narrator's Outcome,
+            updating entity emotional states in the memory system.
+            Each update should have: entity_id, emotion, intensity, cause, target_entity.
+        """
+        for update in emotional_updates:
+            # Handle both Pydantic objects and dicts
+            if hasattr(update, "entity_id"):
+                # Pydantic object
+                entity_id = update.entity_id
+                emotion = update.emotion
+                intensity = update.intensity
+                cause = getattr(update, "cause", None)
+                target_entity = getattr(update, "target_entity", None)
+            else:
+                # Dict
+                entity_id = update.get("entity_id")
+                emotion = update.get("emotion")
+                intensity = update.get("intensity", 0.0)
+                cause = update.get("cause")
+                target_entity = update.get("target_entity")
+
+            if not entity_id or not emotion:
+                logger.warning(f"Skipping invalid emotional state update: {update}")
+                continue
+
+            # Update emotional state in memory system
+            self.memory.update_emotional_state(
+                entity_id=entity_id,
+                emotion=emotion,
+                intensity=intensity,
+                cause=cause,
+                target_entity=target_entity
+            )
+            logger.debug(f"Updated emotional state for {entity_id}: {emotion} ({intensity})")
+
+    def consolidate_session_memories(self) -> Dict[str, Any]:
+        """
+        Trigger memory consolidation for the current session.
+
+        This should be called periodically (e.g., every 10-20 turns) to
+        prevent memory bloat and improve performance.
+
+        Returns:
+            Summary of consolidation actions taken
+        """
+        logger.info("[Orchestrator] Starting memory consolidation...")
+
+        # Consolidate memories using intelligent thresholds
+        max_memories = 50  # Keep top 50 memories per entity per scope
+        threshold = max(10, self.memory.get_turn_count() // 5)  # Consolidate after 10, then every 5 turns
+
+        consolidation_result = self.memory.consolidate_memories(
+            max_memories_per_entity=max_memories,
+            consolidation_threshold=threshold
+        )
+
+        # Save consolidated memory to database
+        self.memory.save_to_database()
+
+        logger.info(f"[Orchestrator] Memory consolidation completed: {consolidation_result}")
+        return consolidation_result
+
+    def get_memory_statistics(self) -> Dict[str, Any]:
+        """
+        Get comprehensive memory statistics for monitoring and debugging.
+
+        Returns:
+            Dictionary with memory system statistics
+        """
+        return self.memory.get_memory_statistics()
 
     def _get_pov_entity(self) -> str:
         """
