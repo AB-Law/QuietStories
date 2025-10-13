@@ -897,6 +897,7 @@ What memories should be recorded from this turn?"""
                     visible_dialogue=None,
                     roll_requests=None,
                     hidden_memory_updates=None,
+                    emotional_state_updates=None,
                     suggested_actions=None,
                 )
             else:
@@ -912,6 +913,7 @@ What memories should be recorded from this turn?"""
                 visible_dialogue=None,
                 roll_requests=None,
                 hidden_memory_updates=None,
+                emotional_state_updates=None,
                 suggested_actions=None,
             )
 
@@ -949,16 +951,23 @@ What memories should be recorded from this turn?"""
         # 2. Total memories exceed 200, OR
         # 3. Any entity has more than 30 memories
         should_consolidate = (
-            turn_count % 10 == 0 or
-            memory_stats["total_memories"] > 200 or
-            any(entity["memory_count"] > 30 for entity in memory_stats.get("largest_entities", []))
+            turn_count % 10 == 0
+            or memory_stats["total_memories"] > 200
+            or any(
+                entity["memory_count"] > 30
+                for entity in memory_stats.get("largest_entities", [])
+            )
         )
 
         if should_consolidate:
-            logger.info(f"[Orchestrator] Triggering memory consolidation (turn {turn_count})")
+            logger.info(
+                f"[Orchestrator] Triggering memory consolidation (turn {turn_count})"
+            )
             consolidation_result = self.consolidate_session_memories()
             if consolidation_result["memories_removed"] > 0:
-                logger.info(f"[Orchestrator] Consolidated {consolidation_result['memories_removed']} memories")
+                logger.info(
+                    f"[Orchestrator] Consolidated {consolidation_result['memories_removed']} memories"
+                )
 
         # Save memory to database
         self.memory.save_to_database()
@@ -1308,6 +1317,7 @@ Summary:"""
                 visible_dialogue=None,
                 roll_requests=None,
                 hidden_memory_updates=None,
+                emotional_state_updates=None,
                 suggested_actions=None,
             )
         except Exception as e:
@@ -1319,6 +1329,7 @@ Summary:"""
                 visible_dialogue=None,
                 roll_requests=None,
                 hidden_memory_updates=None,
+                emotional_state_updates=None,
                 suggested_actions=None,
             )
 
@@ -1531,9 +1542,11 @@ Summary:"""
                 emotion=emotion,
                 intensity=intensity,
                 cause=cause,
-                target_entity=target_entity
+                target_entity=target_entity,
             )
-            logger.debug(f"Updated emotional state for {entity_id}: {emotion} ({intensity})")
+            logger.debug(
+                f"Updated emotional state for {entity_id}: {emotion} ({intensity})"
+            )
 
     def consolidate_session_memories(self) -> Dict[str, Any]:
         """
@@ -1549,17 +1562,20 @@ Summary:"""
 
         # Consolidate memories using intelligent thresholds
         max_memories = 50  # Keep top 50 memories per entity per scope
-        threshold = max(10, self.memory.get_turn_count() // 5)  # Consolidate after 10, then every 5 turns
+        threshold = max(
+            10, self.memory.get_turn_count() // 5
+        )  # Consolidate after 10, then every 5 turns
 
         consolidation_result = self.memory.consolidate_memories(
-            max_memories_per_entity=max_memories,
-            consolidation_threshold=threshold
+            max_memories_per_entity=max_memories, consolidation_threshold=threshold
         )
 
         # Save consolidated memory to database
         self.memory.save_to_database()
 
-        logger.info(f"[Orchestrator] Memory consolidation completed: {consolidation_result}")
+        logger.info(
+            f"[Orchestrator] Memory consolidation completed: {consolidation_result}"
+        )
         return consolidation_result
 
     def get_memory_statistics(self) -> Dict[str, Any]:

@@ -306,7 +306,7 @@ class ScenarioCompiler:
                 entity_id: Optional[str] = None,
                 scope: Optional[str] = None,
                 limit: int = 5,
-                threshold: float = 0.1
+                threshold: float = 0.1,
             ) -> str:
                 """Search memories semantically"""
                 try:
@@ -322,14 +322,16 @@ class ScenarioCompiler:
                         entity_id=entity_id,
                         scope=scope,
                         limit=limit,
-                        threshold=threshold
+                        threshold=threshold,
                     )
 
                     if not results:
                         return f"No memories found for query: {query}"
 
                     # Format results
-                    result_lines = [f"Found {len(results)} relevant memories for '{query}':"]
+                    result_lines = [
+                        f"Found {len(results)} relevant memories for '{query}':"
+                    ]
                     for i, result in enumerate(results, 1):
                         similarity = result.get("similarity", 0)
                         content = result.get("content", "")
@@ -351,7 +353,7 @@ class ScenarioCompiler:
                 entity_id: Optional[str] = None,
                 scope: Optional[str] = None,
                 limit: int = 5,
-                threshold: float = 0.1
+                threshold: float = 0.1,
             ) -> str:
                 """Async version of _run"""
                 return self._run(query, entity_id, scope, limit, threshold)

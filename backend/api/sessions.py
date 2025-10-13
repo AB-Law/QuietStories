@@ -20,8 +20,12 @@ from backend.db.manager import DatabaseManager
 from backend.engine.initializer import SessionInitializer
 from backend.engine.orchestrator import TurnOrchestrator
 from backend.schemas import Outcome, ScenarioSpec
+from backend.utils.cache import (
+    get_cache_statistics,
+    invalidate_session_cache,
+    memory_cache,
+)
 from backend.utils.logger import get_logger
-from backend.utils.cache import memory_cache, invalidate_session_cache, get_cache_statistics
 
 # Set up logging
 logger = get_logger(__name__)
@@ -422,6 +426,8 @@ async def process_turn(session_id: str, request: SessionTurnRequest):
             visible_dialogue=None,
             roll_requests=None,
             hidden_memory_updates=None,
+            emotional_state_updates=None,
+            suggested_actions=None,
         )
 
         session["turn"] += 1
@@ -458,15 +464,16 @@ async def stream_turn_response(session_id: str, request: SessionTurnRequest):
 
     # Load session from database
     session = db.get_session(session_id)
-    if not session:
-        logger.error(f"✗ Session not found: {session_id}")
-        yield f"data: {json.dumps({'type': 'error', 'message': 'Session not found'})}\n\n"
-        return
-
-    current_turn = session["turn"]
-    logger.info(f"Current turn: {current_turn}")
 
     async def generate_stream():
+        if not session:
+            logger.error(f"✗ Session not found: {session_id}")
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Session not found'})}\n\n"
+            return
+
+        current_turn = session["turn"]
+        logger.info(f"Current turn: {current_turn}")
+
         try:
             # Send initial status
             yield f"data: {json.dumps({'type': 'start', 'turn': current_turn})}\n\n"
@@ -655,9 +662,10 @@ async def get_relationships(session_id: str):
     # Get orchestrator to access memory system
     if session_id not in orchestrators_db:
         # Create temporary orchestrator just to access memory
+        import json
+
         from backend.engine.orchestrator import TurnOrchestrator
         from backend.schemas import ScenarioSpec
-        import json
 
         spec = ScenarioSpec(**session["scenario_spec"])
         temp_orchestrator = TurnOrchestrator(spec, session_id, db)
@@ -678,14 +686,14 @@ async def get_relationships(session_id: str):
             "sentiment": rel_data["sentiment"],
             "relationship_type": rel_data["relationship_type"],
             "memory_count": rel_data["memory_count"],
-            "last_interaction": rel_data["last_interaction"]
+            "last_interaction": rel_data["last_interaction"],
         }
 
     result = {
         "session_id": session_id,
         "relationships": formatted_relationships,
         "entity_count": len(session.get("entities", [])),
-        "total_relationships": len(formatted_relationships)
+        "total_relationships": len(formatted_relationships),
     }
 
     # Cache the result
@@ -772,7 +780,4 @@ async def get_cache_stats():
 
     stats = get_cache_statistics()
 
-    return {
-        "cache_stats": stats,
-        "timestamp": datetime.now().isoformat()
-    }
+    return {"cache_stats": stats, "timestamp": datetime.now().isoformat()}

@@ -49,11 +49,18 @@ class HiddenMemoryUpdate(BaseModel):
 class EmotionalStateUpdate(BaseModel):
     """Emotional state update for entities"""
 
-    entity_id: str = Field(..., description="Entity whose emotional state is being updated")
-    emotion: str = Field(..., description="Primary emotion (joy, sadness, anger, fear, disgust, surprise, trust, anticipation)")
+    entity_id: str = Field(
+        ..., description="Entity whose emotional state is being updated"
+    )
+    emotion: str = Field(
+        ...,
+        description="Primary emotion (joy, sadness, anger, fear, disgust, surprise, trust, anticipation)",
+    )
     intensity: float = Field(..., description="Emotional intensity from -1.0 to 1.0")
     cause: Optional[str] = Field(None, description="What caused this emotional state")
-    target_entity: Optional[str] = Field(None, description="Entity this emotion is directed toward")
+    target_entity: Optional[str] = Field(
+        None, description="Entity this emotion is directed toward"
+    )
 
 
 class Outcome(BaseModel):
