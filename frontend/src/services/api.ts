@@ -44,6 +44,20 @@ export interface SessionConfig {
   generate_entity_backgrounds?: boolean;
   initial_entities?: Entity[];
   custom_state?: Record<string, unknown>;
+  player_name?: string;
+}
+
+export interface UserSettings {
+  id: string;
+  player_name: string;
+  preferences: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface SettingsRequest {
+  player_name: string;
+  preferences?: Record<string, unknown>;
 }
 
 export interface SessionCreateRequest {
@@ -227,6 +241,53 @@ class ApiService {
 
     if (!response.ok) {
       throw new Error(`Failed to get session memories: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  // Settings Management
+  async getUserSettings(): Promise<UserSettings> {
+    const response = await fetch(`${this.baseUrl}/settings/`);
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        // Return default settings if none exist
+        throw new Error('Settings not found');
+      }
+      throw new Error(`Failed to get user settings: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  async saveUserSettings(request: SettingsRequest): Promise<UserSettings> {
+    const response = await fetch(`${this.baseUrl}/settings/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to save user settings: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  async updateUserSettings(request: SettingsRequest): Promise<UserSettings> {
+    const response = await fetch(`${this.baseUrl}/settings/`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to update user settings: ${response.statusText}`);
     }
 
     return response.json();

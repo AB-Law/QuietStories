@@ -7,6 +7,7 @@ All data is stored in a single SQLite database file for easy backup and portabil
 
 # mypy: ignore-errors
 
+import uuid
 from datetime import datetime
 
 from sqlalchemy import JSON, Column, DateTime, Integer, String, Text, create_engine
@@ -74,7 +75,29 @@ class Session(Base):
     private_memory = Column(JSON, nullable=False, default=dict)
     public_memory = Column(JSON, nullable=False, default=dict)
     status = Column(String, nullable=False, default="active")
-    scenario_spec = Column(JSON, nullable=True)  # Cached scenario spec
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class UserSettings(Base):
+    """
+    UserSettings table storing user preferences and configuration.
+
+    Attributes:
+        id: Unique settings identifier (UUID)
+        player_name: User's preferred player character name
+        preferences: Additional user preferences as JSON
+        created_at: Timestamp when settings were created
+        updated_at: Timestamp when settings were last modified
+    """
+
+    __tablename__ = "user_settings"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    player_name = Column(String, nullable=False)
+    preferences = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(
         DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow

@@ -1337,16 +1337,14 @@ Summary:"""
         Get the point-of-view entity ID for the current session.
 
         Returns:
-            Entity ID string (currently defaults to "player")
+            Entity ID string for the player character
 
         Note:
-            Current implementation is simplified. In production, this could:
-            - Read from session state
-            - Support multiple player entities
-            - Handle entity switching mid-game
-            - Detect from entity list
-
-        TODO: Implement proper POV detection from session/state
+            Enhanced to detect player character based on:
+            - POV marker in state
+            - Player character entity created by initializer
+            - Player type entities
+            - Legacy "player" entity
         """
         # Check if there's a POV marker in state
         if hasattr(self.spec, "state") and isinstance(self.spec.state, dict):
@@ -1356,8 +1354,19 @@ Summary:"""
 
         # Check if there's a player entity in entities list
         if self.spec.entities:
+            # First, look for player_character (created by initializer with user's name)
             for entity in self.spec.entities:
-                if entity.get("type") == "player" or entity.get("id") == "player":
+                if entity.get("id") == "player_character":
+                    return entity.get("id", "player_character")
+
+            # Then look for explicit player type entities
+            for entity in self.spec.entities:
+                if entity.get("type") == "player":
+                    return entity.get("id", "player")
+
+            # Finally, look for legacy "player" id
+            for entity in self.spec.entities:
+                if entity.get("id") == "player":
                     return entity.get("id", "player")
 
         # Default to "player"
