@@ -54,6 +54,9 @@ class SessionConfig(BaseModel):
     custom_state: Optional[Dict[str, Any]] = Field(
         default=None, description="Custom initial state overrides"
     )
+    player_name: Optional[str] = Field(
+        default=None, description="Player's preferred character name"
+    )
 
 
 class SessionCreateRequest(BaseModel):
@@ -133,8 +136,16 @@ async def create_session(request: SessionCreateRequest):
 
     # Get config or use defaults
     config = request.config if request.config else SessionConfig()
+
+    # Retrieve user settings for player name if not provided in config
+    if not config.player_name:
+        user_settings = db.get_user_settings()
+        if user_settings:
+            config.player_name = user_settings.get("player_name")
+            logger.debug(f"Using player name from settings: {config.player_name}")
+
     logger.debug(
-        f"Session config: num_characters={config.num_characters}, gen_world={config.generate_world_background}, gen_entities={config.generate_entity_backgrounds}"
+        f"Session config: num_characters={config.num_characters}, gen_world={config.generate_world_background}, gen_entities={config.generate_entity_backgrounds}, player_name={config.player_name}"
     )
 
     # Apply custom state if provided
@@ -157,6 +168,7 @@ async def create_session(request: SessionCreateRequest):
             num_characters=config.num_characters,
             generate_world=config.generate_world_background,
             generate_entities=config.generate_entity_backgrounds,
+            player_name=config.player_name,
         )
 
         world_background = init_data["world_background"]

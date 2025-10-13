@@ -5,6 +5,8 @@ import { Button } from './ui/Button';
 import { apiService } from '../services/api';
 import type { Session, TurnResponse, Entity } from '../services/api';
 import { Send, Loader2, Plus, Sparkles } from 'lucide-react';
+import Settings from './Settings';
+import { useUserSettings } from '../hooks/useLocalStorage';
 
 interface Message {
   id: string;
@@ -28,6 +30,8 @@ export function Chat() {
   const [numCharacters, setNumCharacters] = useState(3);
   const [generateWorld, setGenerateWorld] = useState(true);
   const [generateEntityBackgrounds, setGenerateEntityBackgrounds] = useState(true);
+  const { settings: localUserSettings } = useUserSettings();
+  const [userSettings, setUserSettings] = useState<{ playerName: string; preferences: Record<string, any> }>({ playerName: '', preferences: {} });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -47,6 +51,14 @@ export function Chat() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state]);
+
+  // Sync user settings from localStorage
+  useEffect(() => {
+    setUserSettings({
+      playerName: localUserSettings.playerName,
+      preferences: localUserSettings.preferences
+    });
+  }, [localUserSettings]);
 
   const loadExistingSession = async (sessionId: string) => {
     setIsLoading(true);
@@ -150,6 +162,7 @@ export function Chat() {
           num_characters: numCharacters,
           generate_world_background: generateWorld,
           generate_entity_backgrounds: generateEntityBackgrounds,
+          player_name: userSettings.playerName || undefined,
           initial_entities: undefined,
           custom_state: undefined
         }
@@ -404,6 +417,11 @@ export function Chat() {
                         <label htmlFor="gen-entities" className="text-sm cursor-pointer">
                           Generate Character Backgrounds
                         </label>
+                      </div>
+
+                      {/* Settings Component */}
+                      <div className="border-t pt-3">
+                        <Settings onSettingsChange={setUserSettings} />
                       </div>
                     </div>
                   )}
