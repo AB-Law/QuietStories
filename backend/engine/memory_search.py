@@ -12,19 +12,15 @@ from typing import Any, Dict, List, Optional, Tuple
 try:
     import chromadb
     from chromadb.config import Settings
+    from langchain_chroma import Chroma
+    from langchain_community.vectorstores.utils import filter_complex_metadata
+    from langchain_openai import OpenAIEmbeddings
 
     CHROMA_AVAILABLE = True
 except ImportError:
     CHROMA_AVAILABLE = False
 
-try:
-    import numpy as np
-    from sentence_transformers import SentenceTransformer
-
-    SENTENCE_TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    SENTENCE_TRANSFORMERS_AVAILABLE = False
-
+from backend.config import settings
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -48,37 +44,45 @@ class SemanticMemorySearch:
         """
         self.persist_directory = persist_directory
         self.embedding_model = None
-        self.collection = None
+        self.vectorstore = None
 
         if not CHROMA_AVAILABLE:
-            logger.warning("ChromaDB not available. Install with: pip install chromadb")
+            logger.warning(
+                "ChromaDB not available. Install with: pip install chromadb langchain-chroma"
+            )
             return
 
-        if not SENTENCE_TRANSFORMERS_AVAILABLE:
+        # Check if OpenAI API key is available
+        if not settings.openai_api_key:
             logger.warning(
-                "Sentence transformers not available. Install with: pip install sentence-transformers"
+                "OpenAI API key not configured. Semantic memory search will be disabled."
             )
             return
 
         # Initialize embedding model
         try:
-            self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-            logger.info("Initialized semantic memory search with sentence transformers")
+            if settings.openai_api_base:
+                self.embedding_model = OpenAIEmbeddings(
+                    model="text-embedding-3-small",
+                    chunk_size=1000,
+                    base_url=settings.openai_api_base,
+                )
+            else:
+                self.embedding_model = OpenAIEmbeddings(
+                    model="text-embedding-3-small", chunk_size=1000
+                )
+            logger.info("Initialized semantic memory search with OpenAI embeddings")
         except Exception as e:
             logger.error(f"Failed to initialize embedding model: {e}")
             return
 
-        # Initialize ChromaDB
+        # Initialize ChromaDB with LangChain
         try:
             os.makedirs(persist_directory, exist_ok=True)
-            self.client = chromadb.PersistentClient(
-                path=persist_directory, settings=Settings(anonymized_telemetry=False)
-            )
-
-            # Create or get collection for memories
-            self.collection = self.client.get_or_create_collection(
-                name="entity_memories",
-                metadata={"description": "Semantic search for entity memories"},
+            self.vectorstore = Chroma(
+                collection_name="entity_memories",
+                embedding_function=self.embedding_model,
+                persist_directory=persist_directory,
             )
             logger.info(f"Initialized ChromaDB collection in {persist_directory}")
 
@@ -89,9 +93,8 @@ class SemanticMemorySearch:
         """Check if semantic search is available"""
         return (
             CHROMA_AVAILABLE
-            and SENTENCE_TRANSFORMERS_AVAILABLE
             and self.embedding_model is not None
-            and self.collection is not None
+            and self.vectorstore is not None
         )
 
     def add_memory(
@@ -113,19 +116,26 @@ class SemanticMemorySearch:
             return False
 
         try:
-            # Generate embedding for the memory content
-            if self.embedding_model is None:
-                return False
-            embedding = self.embedding_model.encode(content).tolist()
+            # Prepare metadata and filter complex types
+            metadata_dict = {"memory_id": memory_id, **metadata}
 
-            # Prepare metadata
-            metadata_dict = {"memory_id": memory_id, "content": content, **metadata}
+            # Filter out complex metadata types (lists, dicts, etc.) that ChromaDB can't handle
+            filtered_metadata = {}
+            for key, value in metadata_dict.items():
+                if isinstance(value, (str, int, float, bool)) or value is None:
+                    filtered_metadata[key] = value
+                elif isinstance(value, (list, dict)):
+                    # Convert complex types to strings
+                    filtered_metadata[key] = str(value)
+                else:
+                    filtered_metadata[key] = str(value)
 
-            # Add to ChromaDB
-            if self.collection is None:
+            # Add to vectorstore
+            if self.vectorstore is None:
                 return False
-            self.collection.add(
-                ids=[memory_id], embeddings=[embedding], metadatas=[metadata_dict]
+
+            self.vectorstore.add_texts(
+                texts=[content], ids=[memory_id], metadatas=[filtered_metadata]
             )
 
             logger.debug(f"Added memory {memory_id} to semantic index")
@@ -161,48 +171,42 @@ class SemanticMemorySearch:
             return []
 
         try:
-            # Generate embedding for the query
-            if self.embedding_model is None:
-                return []
-            query_embedding = self.embedding_model.encode(query).tolist()
-
-            # Prepare where clause for filtering
-            where_clause = {}
+            # Prepare filters
+            filters = {}
             if entity_id:
-                where_clause["entity_id"] = entity_id
+                filters["entity_id"] = entity_id
             if scope:
-                where_clause["scope"] = scope
+                filters["scope"] = scope
 
-            # Search in ChromaDB
-            if self.collection is None:
+            # Search in vectorstore
+            if self.vectorstore is None:
                 return []
-            results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=limit * 2,  # Get more to filter by threshold
-                where=where_clause if where_clause else None,
+
+            search_results = self.vectorstore.similarity_search_with_score(
+                query=query,
+                k=limit * 2,  # Get more to filter by threshold
+                filter=filters if filters else None,
             )
 
             # Process results
             memories = []
-            if results["distances"] and results["distances"][0]:
-                for i, distance in enumerate(results["distances"][0]):
-                    # Convert distance to similarity (ChromaDB uses cosine distance)
-                    similarity = 1.0 - distance
+            for doc, score in search_results:
+                # Convert score to similarity (higher is better)
+                similarity = 1.0 - score if score <= 1.0 else 1.0 / (1.0 + score)
 
-                    if similarity >= threshold:
-                        metadata = results["metadatas"][0][i]
-                        memories.append(
-                            {
-                                "memory_id": metadata["memory_id"],
-                                "content": metadata["content"],
-                                "similarity": similarity,
-                                "metadata": metadata,
-                            }
-                        )
+                if similarity >= threshold:
+                    memories.append(
+                        {
+                            "memory_id": doc.metadata.get("memory_id", "unknown"),
+                            "content": doc.page_content,
+                            "similarity": similarity,
+                            "metadata": doc.metadata,
+                        }
+                    )
 
-                # Sort by similarity and limit
-                memories.sort(key=lambda x: x["similarity"], reverse=True)
-                memories = memories[:limit]
+            # Sort by similarity and limit
+            memories.sort(key=lambda x: x["similarity"], reverse=True)
+            memories = memories[:limit]
 
             logger.debug(
                 f"Found {len(memories)} semantically similar memories for query: {query}"
@@ -231,11 +235,8 @@ class SemanticMemorySearch:
             return False
 
         try:
-            # Delete old embedding
-            if self.collection is not None:
-                self.collection.delete(ids=[memory_id])
-
-            # Add new embedding
+            # Delete old embedding and add new one
+            self.delete_memory(memory_id)
             return self.add_memory(memory_id, content, metadata)
 
         except Exception as e:
@@ -256,8 +257,8 @@ class SemanticMemorySearch:
             return False
 
         try:
-            if self.collection is not None:
-                self.collection.delete(ids=[memory_id])
+            if self.vectorstore is not None:
+                self.vectorstore.delete(ids=[memory_id])
             logger.debug(f"Deleted memory {memory_id} from semantic index")
             return True
 
@@ -271,13 +272,22 @@ class SemanticMemorySearch:
             return {"available": False}
 
         try:
+            # Try to get collection stats through the underlying client
             count = 0
-            if self.collection is not None:
-                count = self.collection.count()
+            if self.vectorstore is not None:
+                try:
+                    # Access the underlying Chroma collection for stats
+                    collection = self.vectorstore._collection
+                    count = collection.count() if collection else 0
+                except:
+                    count = 0
+
             return {
                 "available": True,
                 "total_memories": count,
-                "embedding_model": "all-MiniLM-L6-v2" if self.embedding_model else None,
+                "embedding_model": (
+                    "text-embedding-3-small" if self.embedding_model else None
+                ),
                 "persist_directory": self.persist_directory,
             }
         except Exception as e:
