@@ -34,31 +34,52 @@ class ScenarioGenerator:
             HumanMessage(content=user_prompt),
         ]
 
-        try:
-            # Use LangChain's structured output for reliable JSON generation
-            # Ref: https://python.langchain.com/docs/concepts/structured_outputs/
-            logger.info("Using structured output to generate ScenarioSpec...")
-            llm = self.provider.llm
-            structured_llm = llm.with_structured_output(
-                ScenarioSpec, method="json_mode"
+        # Check if we're using a local LLM provider
+        # Structured output with json_schema is VERY slow for local LLMs with complex schemas
+        from backend.config import settings
+
+        use_structured_output = settings.model_provider not in ["lmstudio", "ollama"]
+
+        if use_structured_output:
+            logger.info("Using structured output (json_schema) for scenario generation")
+        else:
+            logger.info(
+                f"Provider '{settings.model_provider}' detected - using optimized JSON parsing (faster for local LLMs)"
             )
-            logger.info("Invoking LLM with structured output...")
-            scenario_spec = await structured_llm.ainvoke(messages)
-            logger.info(f"Successfully generated scenario: {scenario_spec.name}")
 
-            # Ensure we have a valid seed
-            if not scenario_spec.seed:
-                scenario_spec.seed = random.randint(1, 1000000)
+        try:
+            if use_structured_output:
+                # Use LangChain's structured output for OpenAI and compatible cloud providers
+                # Ref: https://lmstudio.ai/docs/app/api/structured-output
+                llm = self.provider.llm
 
-            return scenario_spec
+                # Use json_schema method (compatible with both OpenAI and LM Studio)
+                structured_llm = llm.with_structured_output(
+                    ScenarioSpec, method="json_schema"
+                )
+                logger.info("Invoking LLM with structured output (json_schema)...")
+                scenario_spec = await structured_llm.ainvoke(messages)
+
+                logger.info(f"Successfully generated scenario: {scenario_spec.name}")
+
+                # Ensure we have a valid seed
+                if not scenario_spec.seed:
+                    scenario_spec.seed = random.randint(1, 1000000)
+
+                return scenario_spec
+            else:
+                # For local LLMs, skip structured output and use faster fallback
+                raise Exception("Skipping structured output for local LLM performance")
 
         except Exception as e:
-            # Fallback: some providers (e.g., strict JSON mode) reject dynamic object fields
-            # like Action.params/JSONLogic. Fall back to robust JSON parsing flow.
-            logger.error(
-                f"Structured output failed, falling back to manual parsing: {type(e).__name__}: {str(e)}",
-                exc_info=True,
-            )
+            # Fallback: Parse JSON manually (much faster for local LLMs with complex schemas)
+            if use_structured_output:
+                logger.error(
+                    f"Structured output failed, falling back to manual parsing: {type(e).__name__}: {str(e)}",
+                    exc_info=True,
+                )
+            else:
+                logger.info("Using manual JSON parsing for better performance")
 
             # ---------- Fallback path: standard chat + robust JSON extraction ----------
             messages = [
