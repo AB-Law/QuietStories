@@ -35,14 +35,19 @@ class SemanticMemorySearch:
     even when the query doesn't use exact keywords.
     """
 
-    def __init__(self, persist_directory: str = "data/chroma_memories"):
+    def __init__(
+        self, session_id: str, persist_directory: str = "data/chroma_memories"
+    ):
         """
         Initialize the semantic memory search system.
 
         Args:
+            session_id: Unique session identifier for collection isolation
             persist_directory: Directory to persist the vector database
         """
+        self.session_id = session_id
         self.persist_directory = persist_directory
+        self.collection_name = f"session_{session_id}"
         self.embedding_model = None
         self.vectorstore = None
 
@@ -96,11 +101,13 @@ class SemanticMemorySearch:
         try:
             os.makedirs(persist_directory, exist_ok=True)
             self.vectorstore = Chroma(
-                collection_name="entity_memories",
+                collection_name=self.collection_name,
                 embedding_function=self.embedding_model,
                 persist_directory=persist_directory,
             )
-            logger.info(f"Initialized ChromaDB collection in {persist_directory}")
+            logger.info(
+                f"Initialized ChromaDB collection '{self.collection_name}' in {persist_directory}"
+            )
 
         except Exception as e:
             logger.error(f"Failed to initialize ChromaDB: {e}")
@@ -305,6 +312,8 @@ class SemanticMemorySearch:
                     "text-embedding-3-small" if self.embedding_model else None
                 ),
                 "persist_directory": self.persist_directory,
+                "collection_name": self.collection_name,
+                "session_id": self.session_id,
             }
         except Exception as e:
             logger.error(f"Failed to get semantic search stats: {e}")

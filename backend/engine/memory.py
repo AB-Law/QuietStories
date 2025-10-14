@@ -56,7 +56,7 @@ class MemoryManager:
         self._convert_legacy_memories()
 
         # Initialize semantic search
-        self.semantic_search = SemanticMemorySearch()
+        self.semantic_search = SemanticMemorySearch(session_id)
 
     def get_private_memory(self, entity_id: str) -> List[Dict[str, Any]]:
         """Get private memory for an entity (legacy compatibility)"""
