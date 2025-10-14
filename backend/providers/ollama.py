@@ -95,8 +95,7 @@ class OllamaProvider(BaseProvider):
 
     async def _handle_streaming_response(self, llm, prompt, **kwargs):
         """Handle streaming responses"""
-        # For now, return the LLM for streaming
-        # This can be enhanced with proper streaming support
+        # Return the LLM configured for streaming
         return llm
 
     async def health_check(self) -> bool:
