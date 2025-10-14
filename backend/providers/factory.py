@@ -4,7 +4,7 @@ Provider factory for creating LLM providers based on configuration
 
 from typing import Union
 
-from ..config import settings
+from ..config import DEFAULT_LMSTUDIO_API_BASE, settings
 from .base import BaseProvider
 from .generic import GenericProvider
 from .lmstudio import LMStudioProvider
@@ -33,7 +33,7 @@ def create_provider() -> BaseProvider:
 
         # If still using OpenAI default, switch to LM Studio default
         if api_base == "https://api.openai.com/v1":
-            api_base = "http://localhost:1234/v1"  # LM Studio default port
+            api_base = DEFAULT_LMSTUDIO_API_BASE
 
         return LMStudioProvider(
             api_base=api_base,

@@ -2,7 +2,7 @@
 LMStudio provider implementation for local LLM inference
 
 LMStudio provides an OpenAI-compatible API for running local models.
-Default endpoint: http://localhost:5101/v1
+Default endpoint: http://localhost:1234/v1
 """
 
 import json
@@ -12,6 +12,8 @@ from typing import Any, Dict, List, Optional, Union
 from langchain.schema import BaseMessage, HumanMessage
 from langchain.tools import BaseTool
 from langchain_openai import ChatOpenAI
+
+from backend.utils.optimization import TokenEstimator
 
 from .base import BaseProvider, ProviderResponse
 
@@ -177,6 +179,8 @@ class LMStudioProvider(BaseProvider):
         """
         Estimate token usage for local models that don't provide usage stats.
 
+        Uses TokenEstimator for consistent estimation across the codebase.
+
         Args:
             messages: Input messages
             content: Generated content
@@ -184,25 +188,8 @@ class LMStudioProvider(BaseProvider):
         Returns:
             Dictionary with estimated token counts
         """
-        # Rough estimation: ~4 characters per token on average
-        prompt_parts: List[str] = []
-        for msg in messages:
-            if hasattr(msg, "content"):
-                msg_content = msg.content
-                if isinstance(msg_content, str):
-                    prompt_parts.append(msg_content)
-                elif isinstance(msg_content, list):
-                    # Handle list content (mixed media)
-                    prompt_parts.append(" ".join(str(item) for item in msg_content))
-                else:
-                    prompt_parts.append(str(msg_content))
-            else:
-                prompt_parts.append(str(msg))
-
-        prompt_text = " ".join(prompt_parts)
-
-        prompt_tokens = len(prompt_text) // 4
-        completion_tokens = len(content) // 4
+        prompt_tokens = TokenEstimator.estimate_messages_tokens(messages)
+        completion_tokens = TokenEstimator.estimate_tokens(content)
 
         return {
             "prompt_tokens": prompt_tokens,

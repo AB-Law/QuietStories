@@ -9,7 +9,7 @@ from typing import Optional
 
 from langchain.embeddings.base import Embeddings
 
-from backend.config import settings
+from backend.config import DEFAULT_LMSTUDIO_API_BASE, settings
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -142,7 +142,7 @@ def _create_lmstudio_embeddings() -> Optional[Embeddings]:
 
         # If still using OpenAI default, switch to LM Studio default
         if api_base == "https://api.openai.com/v1":
-            api_base = "http://localhost:1234/v1"  # LM Studio default port
+            api_base = DEFAULT_LMSTUDIO_API_BASE
 
         # LM Studio doesn't require an API key
         api_key = settings.openai_api_key or "lm-studio"

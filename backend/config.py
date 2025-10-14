@@ -8,6 +8,10 @@ from typing import Literal, Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
+# Default LM Studio API endpoint
+DEFAULT_LMSTUDIO_PORT = 1234
+DEFAULT_LMSTUDIO_API_BASE = f"http://localhost:{DEFAULT_LMSTUDIO_PORT}/v1"
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
@@ -23,7 +27,7 @@ class Settings(BaseSettings):
     # LM Studio specific configuration
     lmstudio_api_base: Optional[str] = Field(
         default=None,
-        description="LM Studio API base URL (e.g., http://localhost:1234/v1). If not set, uses openai_api_base",
+        description=f"LM Studio API base URL (e.g., {DEFAULT_LMSTUDIO_API_BASE}). If not set, uses openai_api_base",
     )
 
     # Embedding Provider Configuration (for semantic memory search)
