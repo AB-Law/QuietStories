@@ -8,13 +8,23 @@ A dynamic Choose-Your-Own-Adventure (CYOA) engine that generates interactive sto
 - **AI-Powered Narrator**: Uses LLMs to create engaging, context-aware story progression
 - **Multi-Provider Support**: Works with OpenAI, Ollama, LMStudio, and other OpenAI-compatible endpoints
 - **Local LLM Support**: Full support for running models locally via LMStudio or Ollama
+- **Local Embeddings**: Run semantic memory search completely locally without OpenAI API
 - **Smart Optimization**: Automatic context reduction, memory consolidation, and caching for faster performance
 - **Rule Enforcement**: Server-side validation ensures stories follow generated rules
 - **Memory System**: Public and private memory for entities with proper visibility controls
+- **Semantic Memory Search**: Find relevant memories by meaning, not just keywords
 - **Monte Carlo Balancing**: Automatic difficulty balancing through simulation
 - **RESTful API**: FastAPI-based backend with comprehensive endpoints
 - **React Frontend**: Modern web interface for story interaction
 - **Comprehensive Testing**: HTTP-based API testing and debugging tools
+
+## 📚 Documentation
+
+- **[LM Studio Setup Guide](./LMSTUDIO_SETUP.md)** - Complete guide for running QuietStories with LM Studio locally
+- **[Local Embeddings Guide](./LOCAL_EMBEDDINGS.md)** - Set up local embeddings for semantic memory search
+- **[Optimization Guide](./OPTIMIZATION_GUIDE.md)** - Performance tips and local LLM configuration
+- **[Logging Guide](./LOGGING.md)** - Centralized logging and monitoring setup
+- **[Grafana Integration](./GRAFANA_INTEGRATION.md)** - Observability stack for production monitoring
 
 ## Architecture
 
@@ -34,9 +44,13 @@ The system consists of:
 
 - Python 3.11+
 - Node.js 18+ (for frontend)
-- Ollama or LMStudio (optional, for local LLMs)
+- **For Local LLMs**: Ollama or LM Studio (see setup guides below)
+- **For Semantic Search**: ChromaDB (optional, for memory search)
 
-> **NEW:** Full support for local LLMs! See [OPTIMIZATION_GUIDE.md](OPTIMIZATION_GUIDE.md) for setup instructions.
+> **🚀 Running Completely Local?**
+> - Follow the **[LM Studio Setup Guide](./LMSTUDIO_SETUP.md)** for step-by-step instructions
+> - See **[Local Embeddings Guide](./LOCAL_EMBEDDINGS.md)** to enable semantic memory search locally
+> - No OpenAI API key required!
 
 ### Backend Setup
 
@@ -60,14 +74,28 @@ The system consists of:
 
 3. **Configure environment variables:**
    ```bash
-   # Required
-   MODEL_PROVIDER=openai  # or 'ollama' or 'generic'
+   # For OpenAI (cloud)
+   MODEL_PROVIDER=openai
    OPENAI_API_KEY=your_api_key_here
-   MODEL_NAME=gpt-4  # or your preferred model
+   MODEL_NAME=gpt-4o-mini
 
-   # Optional
+   # For LM Studio (local) - See LMSTUDIO_SETUP.md for complete guide
+   MODEL_PROVIDER=lmstudio
+   LMSTUDIO_API_BASE=http://localhost:1234/v1
+   MODEL_NAME=llama-3.2-3b-instruct
+
+   # For Ollama (local)
+   MODEL_PROVIDER=ollama
+   OPENAI_API_BASE=http://localhost:11434/v1
+   MODEL_NAME=llama3.2:3b
+
+   # Optional: Local embeddings for semantic memory search
+   EMBEDDING_PROVIDER=ollama  # or 'lmstudio' or 'none'
+   EMBEDDING_MODEL_NAME=nomic-embed-text
+
+   # Logging (optional)
    LOG_LEVEL=INFO  # DEBUG, INFO, WARNING, ERROR
-   LOG_FILE=logs/app.log  # Optional log file
+   LOG_FILE=logs/app.log
    ```
 
 4. **Start the backend server:**
