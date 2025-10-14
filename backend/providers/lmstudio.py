@@ -96,10 +96,16 @@ class LMStudioProvider(BaseProvider):
                     # Continue without tools
 
             # Handle structured output if requested
+            # LM Studio supports json_schema format per their docs
+            # https://lmstudio.ai/docs/app/api/structured-output
             if json_schema is not None:
+                self.logger.info("[LMStudio] Using structured output with json_schema")
+
                 try:
-                    self.logger.info("[LMStudio] Using structured output")
-                    structured_llm = llm.with_structured_output(json_schema)
+                    # Use with_structured_output which handles json_schema formatting
+                    structured_llm = llm.with_structured_output(
+                        json_schema, method="json_schema"
+                    )
                     structured = await structured_llm.ainvoke(messages)
 
                     # Convert to JSON string
@@ -109,6 +115,9 @@ class LMStudioProvider(BaseProvider):
                         else structured
                     )
 
+                    self.logger.info(
+                        "[LMStudio] Successfully generated structured output"
+                    )
                     return ProviderResponse(
                         content=content,
                         usage=self._estimate_usage(messages, content),
@@ -116,8 +125,8 @@ class LMStudioProvider(BaseProvider):
                         tool_calls=None,
                     )
                 except Exception as e:
-                    self.logger.warning(f"[LMStudio] Structured output failed: {e}")
-                    # Fall back to regular generation and try to parse JSON
+                    self.logger.error(f"[LMStudio] Structured output failed: {e}")
+                    # Fall through to normal generation without JSON constraint
 
             # Handle streaming
             if stream:
