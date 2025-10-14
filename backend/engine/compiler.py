@@ -41,6 +41,12 @@ class ScenarioCompiler:
         # Add semantic search tool
         self.tools.append(self._create_semantic_search_tool())
 
+        # Add batch memory tool
+        self.tools.append(self._create_batch_memory_tool())
+
+        # Add stateful read tool with caching
+        self.tools.append(self._create_stateful_read_tool())
+
     def _create_read_state_tool(self) -> BaseTool:
         """Create tool for reading game state"""
 
@@ -255,7 +261,8 @@ class ScenarioCompiler:
                 "Record a memory for an entity. Specify entity_id, content, and visibility (private or public). "
                 "🔗 PRIORITIZE relationship memories when characters interact! "
                 "Use scope='relationship' for interactions between characters. "
-                "Examples: add_memory(entity_id='elena', content='Growing to trust Marcus after the rescue', visibility='private')"
+                "Include keywords: 'trust', 'fear', 'love', 'alliance', 'rivalry' for auto-relationship extraction. "
+                "Examples: add_memory(entity_id='elena', content='Growing to trust Marcus after the rescue', visibility='private', scope='relationship')"
             )
 
             def _run(
@@ -394,6 +401,124 @@ class ScenarioCompiler:
                 return self._run(query, entity_id, scope, limit, threshold)
 
         tool = SemanticSearchTool()
+        tool._compiler = self  # type: ignore
+        return tool
+
+    def _create_batch_memory_tool(self) -> BaseTool:
+        """Create tool for batch memory updates"""
+
+        class BatchMemoryTool(BaseTool):
+            name: str = "add_memories"
+            description: str = (
+                "Add multiple memories in a single call to reduce tool usage. "
+                "Accepts a list of memory objects with entity_id, content, visibility, and scope. "
+                "Use this for relationship tracking: include 'trust', 'fear', 'love', 'alliance' keywords in content. "
+                "Examples: add_memories([{entity_id: 'elena', content: 'Growing to trust Marcus after rescue', visibility: 'private', scope: 'relationship'}])"
+            )
+
+            def _run(
+                self,
+                memories: List[Dict[str, Any]],
+            ) -> str:
+                """Add multiple memories at once"""
+                try:
+                    compiler = getattr(self, "_compiler", None)
+                    if not compiler or not hasattr(compiler, "_orchestrator"):
+                        return "Error: No orchestrator available"
+
+                    orchestrator = compiler._orchestrator
+                    results = []
+
+                    for memory in memories:
+                        entity_id = memory.get("entity_id")
+                        content = memory.get("content", "")
+                        visibility = memory.get("visibility", "private")
+                        scope = memory.get("scope", "general")
+
+                        if not entity_id or not content:
+                            results.append(f"Skipped invalid memory: {memory}")
+                            continue
+
+                        # Use the existing memory tool logic
+                        vis_enum = "private" if visibility == "private" else "public"
+
+                        orchestrator.memory.update_scoped_memory(
+                            entity_id=entity_id,
+                            content=content,
+                            scope=scope,  # type: ignore
+                            visibility=vis_enum,
+                        )
+
+                        results.append(
+                            f"Memory added for {entity_id} ({scope}): {content[:50]}..."
+                        )
+
+                    return f"Batch memory update completed. {len(results)} memories processed."
+
+                except Exception as e:
+                    return f"Error in batch memory update: {e}"
+
+            async def _arun(
+                self,
+                memories: List[Dict[str, Any]],
+            ) -> str:
+                """Async version of _run"""
+                return self._run(memories)
+
+        tool = BatchMemoryTool()
+        tool._compiler = self  # type: ignore
+        return tool
+
+    def _create_stateful_read_tool(self) -> BaseTool:
+        """Create tool for reading game state with caching"""
+
+        class StatefulReadTool(BaseTool):
+            name: str = "read_state_cached"
+            description: str = (
+                "Read game state with caching for recent values. Use use_cache=True to avoid repeated reads. "
+                "Examples: read_state_cached('state.player.health', use_cache=True)"
+            )
+
+            def _run(
+                self,
+                path: str,
+                use_cache: bool = True,
+            ) -> str:
+                """Read state value with optional caching"""
+                try:
+                    compiler = getattr(self, "_compiler", None)
+                    if not compiler:
+                        return "Error: No compiler available"
+
+                    # Check cache first if requested
+                    if use_cache:
+                        # Simple in-memory cache per compiler instance
+                        cache_key = f"state_cache_{path}"
+                        if hasattr(compiler, cache_key):
+                            cached_value = getattr(compiler, cache_key)
+                            return f"Cached: {cached_value}"
+
+                    # Get fresh value
+                    value = compiler._get_value_at_path(path)
+
+                    # Cache the value if requested
+                    if use_cache:
+                        setattr(compiler, cache_key, value)
+
+                    return f"{value}" if value is not None else "null"
+
+                except Exception as e:
+                    return f"Error reading state: {e}"
+
+            async def _arun(
+                self,
+                path: str,
+                use_cache: bool = True,
+            ) -> str:
+                """Async version of _run"""
+                return self._run(path, use_cache)
+
+        tool = StatefulReadTool()
         tool._compiler = self  # type: ignore
         return tool
 
