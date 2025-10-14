@@ -5,8 +5,11 @@ import { Button } from './ui/Button';
 import { apiService } from '../services/api';
 import type { Session, TurnResponse, Entity } from '../services/api';
 import { Send, Loader2, Plus, Sparkles } from 'lucide-react';
+import { NarrativeMarkdown } from './NarrativeMarkdown';
 import Settings from './Settings';
 import { useUserSettings } from '../hooks/useLocalStorage';
+import { RelationshipGraph } from './RelationshipGraph';
+import { EmotionalStateDisplay } from './EmotionalStateDisplay';
 
 interface Message {
   id: string;
@@ -14,6 +17,7 @@ interface Message {
   content: string;
   timestamp: Date;
   turnNumber?: number;
+  suggestedActions?: string[];
 }
 
 export function Chat() {
@@ -31,7 +35,8 @@ export function Chat() {
   const [generateWorld, setGenerateWorld] = useState(true);
   const [generateEntityBackgrounds, setGenerateEntityBackgrounds] = useState(true);
   const { settings: localUserSettings } = useUserSettings();
-  const [userSettings, setUserSettings] = useState<{ playerName: string; preferences: Record<string, any> }>({ playerName: '', preferences: {} });
+  const [userSettings, setUserSettings] = useState<{ playerName: string; preferences: Record<string, unknown> }>({ playerName: '', preferences: {} });
+  const [sidebarTab, setSidebarTab] = useState<'info' | 'relationships' | 'emotions'>('info');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -229,6 +234,7 @@ export function Chat() {
         content: response.outcome.narrative,
         timestamp: new Date(),
         turnNumber: response.turn,
+        suggestedActions: response.outcome.suggested_actions,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -277,7 +283,7 @@ export function Chat() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] gap-4">
+    <div className="flex flex-col lg:flex-row h-[calc(100vh-4rem)] gap-2 lg:gap-4 p-2 lg:p-0">
       {/* Main Chat Area */}
       <Card className={`flex-1 flex flex-col overflow-hidden ${showSidebar && currentSession ? 'lg:w-2/3' : 'w-full'}`}>
         <CardHeader className="border-b">
@@ -292,8 +298,10 @@ export function Chat() {
                     variant="outline"
                     size="sm"
                     onClick={() => setShowSidebar(!showSidebar)}
+                    className="text-xs sm:text-sm"
                   >
-                    {showSidebar ? 'Hide Info' : 'Show Info'}
+                    <span className="hidden sm:inline">{showSidebar ? 'Hide Info' : 'Show Info'}</span>
+                    <span className="sm:hidden">{showSidebar ? 'Hide' : 'Info'}</span>
                   </Button>
                   <Button
                     variant="outline"
@@ -442,7 +450,7 @@ export function Chat() {
                   }`}
                 >
                   <div
-                    className={`max-w-[80%] rounded-lg px-4 py-2 ${
+                    className={`max-w-[95%] sm:max-w-[85%] lg:max-w-[80%] rounded-lg px-3 sm:px-4 py-2 ${
                       message.role === 'user'
                         ? 'bg-primary text-primary-foreground'
                         : message.role === 'system'
@@ -453,7 +461,15 @@ export function Chat() {
                     {message.role === 'assistant' && message.turnNumber && (
                       <div className="text-xs opacity-70 mb-1">Turn {message.turnNumber}</div>
                     )}
-                    <div className="whitespace-pre-wrap">{message.content}</div>
+                    {message.role === 'assistant' ? (
+                      <div className="prose prose-sm max-w-none dark:prose-invert">
+                        <NarrativeMarkdown className="text-sm leading-relaxed">
+                          {message.content}
+                        </NarrativeMarkdown>
+                      </div>
+                    ) : (
+                      <div className="whitespace-pre-wrap">{message.content}</div>
+                    )}
                     <div className="text-xs opacity-70 mt-1">
                       {message.timestamp.toLocaleTimeString()}
                     </div>
@@ -470,10 +486,33 @@ export function Chat() {
               <div ref={messagesEndRef} />
             </div>
           )}
+
+          {/* Suggested Actions */}
+          {currentSession && messages.length > 0 && messages[messages.length - 1]?.suggestedActions && (
+            <div className="border-t p-3 bg-muted/30">
+              <div className="text-xs font-medium text-muted-foreground mb-2">Suggested Actions:</div>
+              <div className="flex flex-wrap gap-2">
+                {messages[messages.length - 1]?.suggestedActions?.map((action: string, index: number) => (
+                  <Button
+                    key={index}
+                    variant="outline"
+                    size="sm"
+                    className="text-xs h-7"
+                    onClick={() => {
+                      setInputValue(action);
+                      setTimeout(() => inputRef.current?.focus(), 100);
+                    }}
+                  >
+                    {action}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
         </CardContent>
 
         {currentSession && (
-          <div className="border-t p-4">
+          <div className="border-t p-2 sm:p-4">
             <div className="flex gap-2">
               <textarea
                 ref={inputRef}
@@ -482,7 +521,7 @@ export function Chat() {
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyPress={handleKeyPress}
                 disabled={isLoading}
-                className="flex-1 min-h-[40px] max-h-[120px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none overflow-y-auto"
+                className="flex-1 min-h-[40px] max-h-[120px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none overflow-y-auto touch-manipulation"
                 rows={1}
                 style={{ height: 'auto' }}
                 onInput={(e) => {
@@ -491,7 +530,12 @@ export function Chat() {
                   target.style.height = Math.min(target.scrollHeight, 120) + 'px';
                 }}
               />
-              <Button onClick={sendMessage} disabled={isLoading || !inputValue.trim()}>
+              <Button
+                onClick={sendMessage}
+                disabled={isLoading || !inputValue.trim()}
+                size="default"
+                className="min-w-[44px] min-h-[44px] flex-shrink-0"
+              >
                 {isLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
@@ -505,70 +549,114 @@ export function Chat() {
 
       {/* Sidebar - World Info & Entities */}
       {currentSession && showSidebar && (
-        <Card className="hidden lg:block lg:w-1/3 overflow-hidden flex flex-col">
+        <Card className="w-full lg:w-1/3 mt-2 lg:mt-0 overflow-hidden flex flex-col">
           <CardHeader className="border-b">
-            <CardTitle className="text-lg">World Info</CardTitle>
-          </CardHeader>
-          <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
-            {currentSession.scenario_spec?.name ? (
-              <div>
-                <h3 className="font-semibold text-sm text-muted-foreground mb-1">Scenario</h3>
-                <p className="text-sm">{currentSession.scenario_spec.name as string}</p>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg">Session Info</CardTitle>
+              <div className="flex gap-1">
+                <Button
+                  variant={sidebarTab === 'info' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setSidebarTab('info')}
+                >
+                  Info
+                </Button>
+                <Button
+                  variant={sidebarTab === 'relationships' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setSidebarTab('relationships')}
+                >
+                  Relations
+                </Button>
+                <Button
+                  variant={sidebarTab === 'emotions' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setSidebarTab('emotions')}
+                >
+                  Emotions
+                </Button>
               </div>
-            ) : null}
-
-            {/* Turn Counter */}
-            <div>
-              <h3 className="font-semibold text-sm text-muted-foreground mb-1">Current Turn</h3>
-              <p className="text-sm">{currentSession.turn}</p>
             </div>
+          </CardHeader>
 
-            {/* World Background */}
-            {currentSession.world_background && (
-              <div>
-                <h3 className="font-semibold text-sm text-muted-foreground mb-2">World Background</h3>
-                <div className="text-sm bg-muted/50 rounded-md p-3 max-h-48 overflow-y-auto">
-                  <p className="whitespace-pre-wrap">{currentSession.world_background}</p>
+          {sidebarTab === 'info' ? (
+            <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
+              {currentSession.scenario_spec?.name ? (
+                <div>
+                  <h3 className="font-semibold text-sm text-muted-foreground mb-1">Scenario</h3>
+                  <p className="text-sm">{currentSession.scenario_spec.name as string}</p>
                 </div>
-              </div>
-            )}
+              ) : null}
 
-            {/* Entities/Characters */}
-            {currentSession.entities && currentSession.entities.length > 0 && (
+              {/* Turn Counter */}
               <div>
-                <h3 className="font-semibold text-sm text-muted-foreground mb-2">
-                  Characters ({currentSession.entities.length})
-                </h3>
-                <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {currentSession.entities.map((entity) => (
-                    <div key={entity.id} className="bg-muted/30 rounded-md p-3 border">
-                      <div className="flex items-start justify-between mb-1">
-                        <h4 className="font-medium text-sm">
-                          {entity.name || entity.id}
-                        </h4>
-                        <span className="text-xs text-muted-foreground px-2 py-0.5 bg-muted rounded">
-                          {entity.type}
-                        </span>
+                <h3 className="font-semibold text-sm text-muted-foreground mb-1">Current Turn</h3>
+                <p className="text-sm">{currentSession.turn}</p>
+              </div>
+
+              {/* World Background */}
+              {currentSession.world_background && (
+                <div>
+                  <h3 className="font-semibold text-sm text-muted-foreground mb-2">World Background</h3>
+                  <div className="text-sm bg-muted/50 rounded-md p-3 max-h-48 overflow-y-auto">
+                    <p className="whitespace-pre-wrap">{currentSession.world_background}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Entities/Characters */}
+              {currentSession.entities && currentSession.entities.length > 0 && (
+                <div>
+                  <h3 className="font-semibold text-sm text-muted-foreground mb-2">
+                    Characters ({currentSession.entities.length})
+                  </h3>
+                  <div className="space-y-3 max-h-96 overflow-y-auto">
+                    {currentSession.entities.map((entity) => (
+                      <div key={entity.id} className="bg-muted/30 rounded-md p-3 border">
+                        <div className="flex items-start justify-between mb-1">
+                          <h4 className="font-medium text-sm">
+                            {entity.name || entity.id}
+                          </h4>
+                          <span className="text-xs text-muted-foreground px-2 py-0.5 bg-muted rounded">
+                            {entity.type}
+                          </span>
+                        </div>
+                        {entity.background && (
+                          <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
+                            {entity.background}
+                          </p>
+                        )}
                       </div>
-                      {entity.background && (
-                        <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
-                          {entity.background}
-                        </p>
-                      )}
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Turn History Count */}
-            {currentSession.turn_history && currentSession.turn_history.length > 0 && (
-              <div>
-                <h3 className="font-semibold text-sm text-muted-foreground mb-1">History</h3>
-                <p className="text-sm">{currentSession.turn_history.length} turns recorded</p>
-              </div>
-            )}
-          </CardContent>
+              {/* Turn History Count */}
+              {currentSession.turn_history && currentSession.turn_history.length > 0 && (
+                <div>
+                  <h3 className="font-semibold text-sm text-muted-foreground mb-1">History</h3>
+                  <p className="text-sm">{currentSession.turn_history.length} turns recorded</p>
+                </div>
+              )}
+            </CardContent>
+          ) : sidebarTab === 'relationships' ? (
+            <div className="flex-1">
+              <RelationshipGraph
+                sessionId={currentSession.id}
+                entities={currentSession.entities || []}
+                isVisible={true}
+              />
+            </div>
+          ) : (
+            <div className="flex-1">
+              <EmotionalStateDisplay
+                sessionId={currentSession.id}
+                entities={currentSession.entities || []}
+                isVisible={true}
+              />
+            </div>
+          )}
         </Card>
       )}
     </div>
