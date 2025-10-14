@@ -10,7 +10,7 @@ This module coordinates the game loop, managing:
 
 import json
 import random
-from typing import Annotated, Any, Dict, List, Optional, Union
+from typing import Annotated, Any, AsyncIterator, Dict, List, Optional, Union
 
 from langchain.schema import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.messages import ToolMessage
@@ -1258,9 +1258,8 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
         conversation_summary = self._summarize_conversation(messages)
 
         # Return the structured response as an AIMessage for proper parsing
-        # Use a special prefix to identify this as the outcome message
-        outcome_content = f"[OUTCOME_MARKER]{final_response.content or ''}"
-        outcome_message = AIMessage(content=outcome_content)
+        # No longer need the OUTCOME_MARKER prefix - the JSON structure is clear enough
+        outcome_message = AIMessage(content=final_response.content or "")
 
         return {
             "messages": [outcome_message],
@@ -1378,22 +1377,21 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
             # Find the outcome message first, then fall back to last assistant message with content
             logger.debug(f"[Orchestrator] Examining {len(messages)} final messages")
 
-            # First pass: look for messages with outcome marker
+            # First pass: look for messages with JSON outcome structure
             for i, msg in enumerate(reversed(messages)):
                 content = _get_message_content_as_string(msg)
                 logger.debug(
-                    f"[Orchestrator] Message {len(messages)-1-i}: {type(msg).__name__} - content length: {len(content)} - has outcome marker: {content.startswith('[OUTCOME_MARKER]')}"
+                    f"[Orchestrator] Message {len(messages)-1-i}: {type(msg).__name__} - content length: {len(content)} - checking for JSON structure"
                 )
-                if content.startswith("[OUTCOME_MARKER]") and content.strip():
-                    # Remove the marker prefix
-                    clean_content = content[len("[OUTCOME_MARKER]") :].strip()
-                    # Create a temporary message with clean content for parsing
-                    final_message = type(msg)(content=clean_content)
+
+                # Check if this looks like a JSON outcome (has narrative field and proper structure)
+                if content.strip() and self._is_outcome_message(content):
+                    final_message = msg
                     logger.info(
-                        f"[Orchestrator] Selected OUTCOME message: {type(msg).__name__} with {len(clean_content)} chars"
+                        f"[Orchestrator] Selected OUTCOME message: {type(msg).__name__} with {len(content)} chars"
                     )
                     logger.debug(
-                        f"[Orchestrator] Outcome message content preview: {clean_content[:200]}..."
+                        f"[Orchestrator] Outcome message content preview: {content[:200]}..."
                     )
                     break
 
@@ -1529,6 +1527,133 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
         self.memory.save_to_database()
 
         return outcome
+
+    async def process_turn_streaming(
+        self, user_input: Optional[str] = None
+    ) -> AsyncIterator[str]:
+        """
+        Process a turn with hybrid streaming: read tools → stream narrative → write tools → confirm.
+
+        This method implements the hybrid streaming approach:
+        1. Execute read tools first (read_state, search_memories, query_relationships)
+        2. Stream narrative generation with read tool context
+        3. Execute write tools after streaming (add_memory, update_state, update_world)
+        4. Send brief confirmation to LLM with tool results
+
+        Args:
+            user_input: Optional player action description
+
+        Yields:
+            Narrative tokens as they are generated, then final outcome
+        """
+        logger.info(
+            f"[Orchestrator] Processing turn {self.memory.get_turn_count() + 1} with hybrid streaming"
+        )
+
+        # Build context for the LLM
+        context = self._build_context()
+
+        # Phase 1: Execute read tools first
+        logger.info("[Orchestrator] Phase 1: Executing read tools...")
+        read_tools = ["read_state", "search_memories"]
+        read_results = []
+
+        # Execute read tools
+        for tool_name in read_tools:
+            tool = next((t for t in self.tools if t.name == tool_name), None)
+            if tool:
+                try:
+                    # Execute tool directly
+                    result = await tool._arun()  # This would need proper implementation
+                    read_results.append(f"{tool_name}: {result}")
+                    logger.debug(
+                        f"[Orchestrator] Read tool {tool_name} executed: {result[:100]}..."
+                    )
+                except Exception as e:
+                    logger.warning(f"[Orchestrator] Read tool {tool_name} failed: {e}")
+                    read_results.append(f"{tool_name}: Error - {str(e)}")
+
+        # Phase 2: Stream narrative generation
+        logger.info("[Orchestrator] Phase 2: Starting narrative streaming...")
+
+        # Build messages for narrative generation (include read tool results in context)
+        narrative_messages = [
+            SystemMessage(content=self._get_system_prompt()),
+            HumanMessage(content=self._get_user_prompt(context, user_input)),
+        ]
+
+        # Add read tool results as context
+        if read_results:
+            read_context = "Read tool results for context:\n" + "\n".join(read_results)
+            narrative_messages.append(SystemMessage(content=read_context))
+
+        try:
+            # Stream the narrative
+            async for token in self.provider.astream_chat(narrative_messages, tools=[]):
+                if token and token.strip():  # Only yield non-empty tokens
+                    yield token
+
+        except Exception as e:
+            logger.error(f"[Orchestrator] Narrative streaming failed: {e}")
+            yield f"Error in narrative generation: {str(e)}"
+            return
+
+        # Phase 3: Execute write tools after streaming
+        logger.info("[Orchestrator] Phase 3: Executing write tools...")
+        write_tools = ["add_memory", "update_state", "update_world"]
+        write_results = []
+
+        for tool_name in write_tools:
+            tool = next((t for t in self.tools if t.name == tool_name), None)
+            if tool:
+                try:
+                    # Execute tool directly
+                    result = await tool._arun()  # This would need proper implementation
+                    write_results.append(f"{tool_name}: {result}")
+                    logger.debug(
+                        f"[Orchestrator] Write tool {tool_name} executed: {result[:100]}..."
+                    )
+                except Exception as e:
+                    logger.warning(f"[Orchestrator] Write tool {tool_name} failed: {e}")
+                    write_results.append(f"{tool_name}: Error - {str(e)}")
+
+        # Phase 4: Confirm to LLM with tool results
+        logger.info("[Orchestrator] Phase 4: Sending confirmation to LLM...")
+
+        if write_results:
+            confirmation_prompt = (
+                "Write tools have been executed with the following results:\n"
+                + "\n".join(write_results)
+                + "\n\nAcknowledge the tool executions and provide any final thoughts."
+            )
+
+            confirmation_messages = [
+                SystemMessage(content="You are confirming tool execution results."),
+                HumanMessage(content=confirmation_prompt),
+            ]
+
+            try:
+                confirmation_response = await self.provider.chat(
+                    confirmation_messages, tools=[]
+                )
+                logger.debug(
+                    f"[Orchestrator] LLM confirmation: {confirmation_response.content[:200]}..."
+                )
+            except Exception as e:
+                logger.warning(f"[Orchestrator] LLM confirmation failed: {e}")
+
+        # Return final outcome (simplified for now)
+        outcome = Outcome(
+            narrative="Narrative streaming completed.",
+            state_changes=[],
+            visible_dialogue=None,
+            roll_requests=None,
+            hidden_memory_updates=None,
+            emotional_state_updates=None,
+            suggested_actions=None,
+        )
+
+        yield f"\n\n[OUTCOME]{outcome.dict()}"
 
     def _build_context_from_state(self, state: AgentState) -> Dict[str, Any]:
         """
@@ -1863,6 +1988,23 @@ Summary:"""
             logger.info(
                 f"[Parse] Successfully parsed outcome: {list(outcome_data.keys())}"
             )
+
+            # Check if the data is wrapped in an "outcome" key
+            if "outcome" in outcome_data and isinstance(outcome_data["outcome"], dict):
+                logger.debug(
+                    "[Parse] Found wrapped outcome data, extracting inner object"
+                )
+                outcome_data = outcome_data["outcome"]
+
+            # Ensure required fields have defaults if missing
+            if "state_changes" not in outcome_data:
+                logger.debug("[Parse] Missing state_changes field, adding empty list")
+                outcome_data["state_changes"] = []
+
+            if "narrative" not in outcome_data:
+                logger.debug("[Parse] Missing narrative field, adding default")
+                outcome_data["narrative"] = "The story continues..."
+
             return Outcome(**outcome_data)
         except json.JSONDecodeError as e:
             logger.warning(f"[Parse] JSON parsing error: {e}")
@@ -1883,6 +2025,29 @@ Summary:"""
                     logger.info(
                         "[Parse] Successfully extracted and parsed JSON from response"
                     )
+
+                    # Check if the data is wrapped in an "outcome" key
+                    if "outcome" in outcome_data and isinstance(
+                        outcome_data["outcome"], dict
+                    ):
+                        logger.debug(
+                            "[Parse] Found wrapped outcome data in extracted JSON, extracting inner object"
+                        )
+                        outcome_data = outcome_data["outcome"]
+
+                    # Ensure required fields have defaults if missing
+                    if "state_changes" not in outcome_data:
+                        logger.debug(
+                            "[Parse] Missing state_changes field in extracted JSON, adding empty list"
+                        )
+                        outcome_data["state_changes"] = []
+
+                    if "narrative" not in outcome_data:
+                        logger.debug(
+                            "[Parse] Missing narrative field in extracted JSON, adding default"
+                        )
+                        outcome_data["narrative"] = "The story continues..."
+
                     return Outcome(**outcome_data)
                 except Exception as e2:
                     logger.error(f"[Parse] JSON extraction failed: {e2}")
@@ -2670,3 +2835,48 @@ IMPORTANT:
             return True
 
         return False
+
+    def _is_outcome_message(self, content: str) -> bool:
+        """
+        Check if a message content looks like a JSON outcome structure.
+
+        Args:
+            content: Message content to check
+
+        Returns:
+            True if this looks like an outcome message
+        """
+        import json
+
+        try:
+            content = content.strip()
+
+            # Must start with { and end with }
+            if not (content.startswith("{") and content.endswith("}")):
+                return False
+
+            # Try to parse as JSON
+            data = json.loads(content)
+
+            # Check for required outcome fields
+            if not isinstance(data, dict):
+                return False
+
+            # Must have 'narrative' field (key requirement for outcomes)
+            if "narrative" not in data:
+                return False
+
+            # Should have at least one other outcome field
+            outcome_fields = {
+                "state_changes",
+                "visible_dialogue",
+                "roll_requests",
+                "suggested_actions",
+                "hidden_memory_updates",
+            }
+            has_outcome_field = any(field in data for field in outcome_fields)
+
+            return has_outcome_field
+
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            return False

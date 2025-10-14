@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # Loki - Log aggregation system
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: quietstories-loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./logging/loki-config.yml:/etc/loki/local-config.yaml
+      - loki-data:/loki
+    networks:
+      - logging
+    restart: unless-stopped
+    environment:
+      - JAEGER_AGENT_HOST=
+      - JAEGER_ENDPOINT=
+      - JAEGER_SAMPLER_TYPE=
+      - JAEGER_SAMPLER_PARAM=
+
+  # Grafana - Visualization and dashboards
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: quietstories-grafana
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./logging/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+      - ./logging/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+      - ./logging/dashboards:/var/lib/grafana/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_INSTALL_PLUGINS=
+    networks:
+      - logging
+    restart: unless-stopped
+    depends_on:
+      - loki
+
+  # Promtail - Log shipping agent
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: quietstories-promtail
+    volumes:
+      - ./logging/promtail-config.yml:/etc/promtail/config.yml:ro
+      - ./logs:/var/log/quietstories:ro
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - logging
+    restart: unless-stopped
+    depends_on:
+      - loki
+
+volumes:
+  loki-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+networks:
+  logging:
+    driver: bridge
