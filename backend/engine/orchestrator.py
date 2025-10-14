@@ -186,9 +186,8 @@ class TurnOrchestrator:
         # Add agent node for LLM calls
         builder.add_node("agent", self._call_agent)
 
-        # Add tool node for tool execution
-        tool_node = ToolNode(self.tools)
-        builder.add_node("tools", tool_node)
+        # Add tool node for tool execution with error handling
+        builder.add_node("tools", self._call_tools_with_logging)
 
         # Add tool result processing node
         builder.add_node("process_tools", self._process_tool_results)
@@ -272,12 +271,57 @@ class TurnOrchestrator:
 
         # Add reflection response to messages
         if reflection_response.tool_calls:
+            # Format tool_calls for LangGraph compatibility (same as in _call_agent)
+            formatted_tool_calls = []
+            for i, tc in enumerate(reflection_response.tool_calls):
+                logger.debug(f"[Reflection] Processing tool call {i}: {tc}")
+
+                # Handle OpenAI format with "function" wrapper
+                if "function" in tc:
+                    function_info = tc.get("function", {})
+                    tool_name = function_info.get("name")
+                    raw_args = function_info.get("arguments", {})
+                    logger.debug(
+                        f"[Reflection] OpenAI format - tool: {tool_name}, args: {raw_args}"
+                    )
+                else:
+                    # Direct format
+                    tool_name = tc.get("name")
+                    raw_args = tc.get("args", {})
+                    logger.debug(
+                        f"[Reflection] Direct format - tool: {tool_name}, args: {raw_args}"
+                    )
+
+                # Parse args if they're a string
+                if isinstance(raw_args, str):
+                    try:
+                        parsed_args = json.loads(raw_args) if raw_args else {}
+                    except json.JSONDecodeError:
+                        logger.warning(
+                            f"[Reflection] Failed to parse args as JSON: {raw_args}"
+                        )
+                        parsed_args = {}
+                else:
+                    parsed_args = raw_args
+
+                formatted_call = {
+                    "name": tool_name,
+                    "args": parsed_args,
+                    "id": tc.get("id"),
+                    "type": "tool_call",  # LangGraph expects "tool_call", not "function"
+                }
+
+                logger.debug(f"[Reflection] Formatted tool call {i}: {formatted_call}")
+                formatted_tool_calls.append(formatted_call)
+
+            # For reflection with tool calls, minimize content to avoid interfering with outcome selection
             assistant_message = AIMessage(
-                content=reflection_response.content or "",
-                tool_calls=reflection_response.tool_calls,
+                content="[Memory updates completed]",  # Minimal marker content
+                tool_calls=formatted_tool_calls,
             )
         else:
-            assistant_message = AIMessage(content=reflection_response.content or "")
+            # For reflection without tool calls, use minimal content
+            assistant_message = AIMessage(content="[No memory updates needed]")
 
         logger.debug("[Reflection] Reflection phase completed")
         return {"messages": messages + [assistant_message]}
@@ -323,7 +367,7 @@ Use memory tools to record these insights. Focus on:
 - World changes that affect future decisions
 - Key information that might be relevant later
 
-What memories should be recorded from this turn?"""
+IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual response - only call the add_memory tool for each insight you want to record."""
 
     def _check_for_errors(self, state: AgentState) -> str:
         """
@@ -640,28 +684,53 @@ What memories should be recorded from this turn?"""
         # Call LLM with tools
         response = await self.provider.chat(messages=messages, tools=self.tools)
 
-        # Format tool_calls for LangChain compatibility
+        logger.debug(f"[Agent] LLM response content: {response.content}")
+        logger.debug(f"[Agent] LLM response tool_calls: {response.tool_calls}")
+
+        # Format tool_calls for LangGraph compatibility
         formatted_tool_calls = []
         if response.tool_calls:
-            for tc in response.tool_calls:
-                raw_args = tc.get("function", {}).get("arguments", {})
+            logger.debug(f"[Agent] Processing {len(response.tool_calls)} tool calls")
+            for i, tc in enumerate(response.tool_calls):
+                logger.debug(f"[Agent] Processing tool call {i}: {tc}")
+
+                # Handle OpenAI format with "function" wrapper
+                if "function" in tc:
+                    function_info = tc.get("function", {})
+                    tool_name = function_info.get("name")
+                    raw_args = function_info.get("arguments", {})
+                    logger.debug(
+                        f"[Agent] OpenAI format - tool: {tool_name}, args: {raw_args}"
+                    )
+                else:
+                    # Direct format
+                    tool_name = tc.get("name")
+                    raw_args = tc.get("args", {})
+                    logger.debug(
+                        f"[Agent] Direct format - tool: {tool_name}, args: {raw_args}"
+                    )
+
                 # Parse args if they're a string
                 if isinstance(raw_args, str):
                     try:
                         parsed_args = json.loads(raw_args) if raw_args else {}
                     except json.JSONDecodeError:
+                        logger.warning(
+                            f"[Agent] Failed to parse args as JSON: {raw_args}"
+                        )
                         parsed_args = {}
                 else:
                     parsed_args = raw_args
 
-                formatted_tool_calls.append(
-                    {
-                        "name": tc.get("function", {}).get("name"),
-                        "args": parsed_args,
-                        "id": tc.get("id"),
-                        "type": tc.get("type", "function"),
-                    }
-                )
+                formatted_call = {
+                    "name": tool_name,
+                    "args": parsed_args,
+                    "id": tc.get("id"),
+                    "type": "tool_call",  # LangGraph expects "tool_call", not "function"
+                }
+
+                logger.debug(f"[Agent] Formatted tool call {i}: {formatted_call}")
+                formatted_tool_calls.append(formatted_call)
 
         # Create AIMessage
         if formatted_tool_calls:
@@ -679,6 +748,61 @@ What memories should be recorded from this turn?"""
             "entities": self.spec.entities,
         }
 
+    async def _call_tools_with_logging(self, state: AgentState) -> Dict[str, Any]:
+        """
+        Execute tool calls with detailed logging to debug the error.
+        """
+        try:
+            logger.info("[Tools] Starting tool execution")
+            messages = state["messages"]
+            last_message = messages[-1]
+
+            logger.debug(f"[Tools] Last message type: {type(last_message).__name__}")
+            logger.debug(
+                f"[Tools] Has tool_calls attribute: {hasattr(last_message, 'tool_calls')}"
+            )
+
+            if hasattr(last_message, "tool_calls"):
+                logger.debug(f"[Tools] Tool calls: {last_message.tool_calls}")
+
+            # Use standard ToolNode but with error wrapping
+            tool_node = ToolNode(self.tools)
+            logger.debug(f"[Tools] Created ToolNode with {len(self.tools)} tools")
+
+            # Call the standard ToolNode
+            logger.debug("[Tools] Invoking ToolNode...")
+            result = await tool_node.ainvoke(state)
+            logger.info(f"[Tools] ToolNode completed successfully")
+            logger.debug(f"[Tools] Result: {result}")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"[Tools] Tool execution failed: {e}")
+            logger.error(f"[Tools] Exception type: {type(e).__name__}")
+
+            import traceback
+
+            logger.error(f"[Tools] Full traceback:")
+            for line in traceback.format_exc().splitlines():
+                logger.error(f"[Tools] {line}")
+
+            # Return error as tool message
+            from langchain_core.messages import ToolMessage
+
+            error_message = ToolMessage(
+                content=f"Tool execution error: {str(e)}",
+                tool_call_id="error",
+                name="error",
+            )
+
+            return {
+                "messages": [error_message],
+                "context": state.get("context", {}),
+                "game_state": state.get("game_state", {}),
+                "entities": state.get("entities", []),
+            }
+
     def _should_continue(self, state: AgentState) -> str:
         """
         Enhanced conditional routing function with intelligent decisions.
@@ -692,10 +816,16 @@ What memories should be recorded from this turn?"""
         messages = state["messages"]
         last_message = messages[-1]
 
+        logger.debug(f"[Router] Examining last message: {type(last_message).__name__}")
+        logger.debug(
+            f"[Router] Message content preview: {getattr(last_message, 'content', '')[:100]}..."
+        )
+
         # If the LLM made tool calls, execute tools
         if hasattr(last_message, "tool_calls") and last_message.tool_calls:
             tool_names = [tc.get("name", "unknown") for tc in last_message.tool_calls]
-            logger.debug(f"[Router] Routing to tools: {tool_names}")
+            logger.info(f"[Router] Routing to tools: {tool_names}")
+            logger.debug(f"[Router] Tool calls detail: {last_message.tool_calls}")
             return "tools"
 
         # Enhanced routing logic based on context and tool results
@@ -778,17 +908,28 @@ What memories should be recorded from this turn?"""
         )
 
         # Get structured response
+        logger.debug("[Outcome] Requesting structured JSON response from LLM...")
         final_response = await self.provider.chat(
             messages=messages, json_schema=self._get_outcome_schema()
+        )
+
+        logger.debug(
+            f"[Outcome] LLM response content length: {len(final_response.content or '')}"
+        )
+        logger.debug(
+            f"[Outcome] LLM response preview: {(final_response.content or '')[:200]}..."
         )
 
         # Store conversation history in state for persistence
         conversation_summary = self._summarize_conversation(messages)
 
+        # Return the structured response as an AIMessage for proper parsing
+        # Use a special prefix to identify this as the outcome message
+        outcome_content = f"[OUTCOME_MARKER]{final_response.content or ''}"
+        outcome_message = AIMessage(content=outcome_content)
+
         return {
-            "messages": [
-                HumanMessage(content=f"Generated outcome: {final_response.content}")
-            ],
+            "messages": [outcome_message],
             "conversation_summary": conversation_summary,
         }
 
@@ -876,18 +1017,51 @@ What memories should be recorded from this turn?"""
         )
 
         try:
-            # Execute the graph
+            # Execute the graph with detailed logging
+            logger.debug("[Orchestrator] Starting graph execution...")
             final_state = await self.graph.ainvoke(initial_state, config)
 
             # Extract the final response for outcome parsing
             messages = final_state["messages"]
             final_message = None
 
-            # Find the last assistant message with content
-            for msg in reversed(messages):
-                if hasattr(msg, "content") and msg.content and msg.content.strip():
-                    final_message = msg
+            # Find the outcome message first, then fall back to last assistant message with content
+            logger.debug(f"[Orchestrator] Examining {len(messages)} final messages")
+
+            # First pass: look for messages with outcome marker
+            for i, msg in enumerate(reversed(messages)):
+                content = _get_message_content_as_string(msg)
+                logger.debug(
+                    f"[Orchestrator] Message {len(messages)-1-i}: {type(msg).__name__} - content length: {len(content)} - has outcome marker: {content.startswith('[OUTCOME_MARKER]')}"
+                )
+                if content.startswith("[OUTCOME_MARKER]") and content.strip():
+                    # Remove the marker prefix
+                    clean_content = content[len("[OUTCOME_MARKER]") :].strip()
+                    # Create a temporary message with clean content for parsing
+                    final_message = type(msg)(content=clean_content)
+                    logger.info(
+                        f"[Orchestrator] Selected OUTCOME message: {type(msg).__name__} with {len(clean_content)} chars"
+                    )
+                    logger.debug(
+                        f"[Orchestrator] Outcome message content preview: {clean_content[:200]}..."
+                    )
                     break
+
+            # Second pass: fall back to any message with content if no outcome message found
+            if not final_message:
+                logger.debug(
+                    "[Orchestrator] No outcome marker found, falling back to last message with content"
+                )
+                for i, msg in enumerate(reversed(messages)):
+                    if hasattr(msg, "content") and msg.content and msg.content.strip():
+                        final_message = msg
+                        logger.info(
+                            f"[Orchestrator] Selected FALLBACK message: {type(msg).__name__} with {len(msg.content)} chars"
+                        )
+                        logger.debug(
+                            f"[Orchestrator] Fallback message content preview: {msg.content[:200]}..."
+                        )
+                        break
 
             if not final_message:
                 logger.warning("[Orchestrator] No final message found, using fallback")
@@ -906,6 +1080,16 @@ What memories should be recorded from this turn?"""
 
         except Exception as e:
             logger.error(f"[Orchestrator] Langgraph execution failed: {e}")
+            logger.error(f"[Orchestrator] Exception type: {type(e).__name__}")
+            logger.error(f"[Orchestrator] Exception args: {e.args}")
+
+            # Log the full traceback to understand where the error originates
+            import traceback
+
+            logger.error(f"[Orchestrator] Full traceback:")
+            for line in traceback.format_exc().splitlines():
+                logger.error(f"[Orchestrator] {line}")
+
             # Fallback to minimal outcome
             outcome = Outcome(
                 narrative="The story continues...",
@@ -1287,30 +1471,57 @@ Summary:"""
             # Clean up content - remove double curly braces if present
             content = content.strip()
 
+            logger.debug(f"[Parse] Original content length: {len(content)}")
+            logger.debug(f"[Parse] Content preview (first 300 chars): {content[:300]}")
+            logger.debug(f"[Parse] Content preview (last 100 chars): {content[-100:]}")
+
             # Fix double curly braces ({{ -> {, }} -> })
             if content.startswith("{{") and content.endswith("}}"):
-                logger.debug("Removing double curly braces from content")
+                logger.debug("[Parse] Removing double curly braces from content")
                 content = content[1:-1]  # Remove first and last character
 
+            # Check if content is empty or just whitespace
+            if not content or not content.strip():
+                logger.warning("[Parse] Content is empty or whitespace only")
+                raise json.JSONDecodeError("Empty content", "", 0)
+
             # Try to parse JSON directly
+            logger.debug("[Parse] Attempting direct JSON parse...")
             outcome_data = json.loads(content)
-            logger.debug(f"Successfully parsed outcome: {list(outcome_data.keys())}")
+            logger.info(
+                f"[Parse] Successfully parsed outcome: {list(outcome_data.keys())}"
+            )
             return Outcome(**outcome_data)
         except json.JSONDecodeError as e:
-            logger.warning(f"JSON parsing error: {e}")
-            logger.debug(f"Content preview: {content[:200]}")
+            logger.warning(f"[Parse] JSON parsing error: {e}")
+            logger.warning(
+                f"[Parse] Failed content (first 500 chars): {repr(content[:500])}"
+            )
+
             # Try to extract JSON from response
+            logger.debug("[Parse] Attempting JSON extraction with regex...")
             json_match = re.search(r"\{.*\}", content, re.DOTALL)
             if json_match:
                 try:
                     json_str = json_match.group()
+                    logger.debug(
+                        f"[Parse] Extracted JSON (first 200 chars): {json_str[:200]}"
+                    )
                     outcome_data = json.loads(json_str)
-                    logger.info("Successfully extracted and parsed JSON from response")
+                    logger.info(
+                        "[Parse] Successfully extracted and parsed JSON from response"
+                    )
                     return Outcome(**outcome_data)
                 except Exception as e2:
-                    logger.error(f"JSON extraction failed: {e2}")
+                    logger.error(f"[Parse] JSON extraction failed: {e2}")
+                    logger.debug(
+                        f"[Parse] Failed extracted content: {repr(json_str[:200])}"
+                    )
+            else:
+                logger.warning("[Parse] No JSON pattern found in content")
+
             # Fallback to minimal outcome
-            logger.warning("Falling back to minimal outcome")
+            logger.warning("[Parse] Falling back to minimal outcome")
             return Outcome(
                 narrative="The story continues...",
                 state_changes=[],
