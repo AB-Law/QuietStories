@@ -867,3 +867,103 @@ class MemoryManager:
             )
 
         return " | ".join(summary)
+
+    async def analyze_relationship_with_llm(
+        self, content: str, provider=None
+    ) -> Dict[str, Any]:
+        """
+        Use LLM to analyze relationship content for more nuanced sentiment and type classification.
+
+        Args:
+            content: The relationship memory content to analyze
+            provider: Optional LLM provider instance
+
+        Returns:
+            Dictionary with sentiment score, relationship type, and reasoning
+        """
+        if not provider:
+            # Skip LLM analysis if no provider available, fall back to keyword-based
+            return {
+                "sentiment": self._analyze_relationship_sentiment(content),
+                "relationship_type": self._classify_relationship_type(content),
+                "confidence": 0.5,
+                "reasoning": "Keyword-based analysis (no LLM provider)",
+            }
+
+        analysis_prompt = f"""Analyze this relationship memory for sentiment and type:
+
+MEMORY CONTENT: "{content}"
+
+Provide analysis in this exact JSON format:
+{{
+  "sentiment": <float between -1.0 and 1.0, where -1.0 is very negative, 0.0 is neutral, 1.0 is very positive>,
+  "relationship_type": "<one of: family, friendship, romantic, adversarial, mentor, professional, acquaintance>",
+  "confidence": <float between 0.0 and 1.0 indicating how confident you are in this analysis>,
+  "reasoning": "<brief explanation of your analysis>"
+}}
+
+Examples:
+- "Growing to trust Marcus after he saved me" → sentiment: 0.6, type: "friendship"
+- "Feeling betrayed by Elena's lies about the artifact" → sentiment: -0.7, type: "adversarial"
+- "My sister always protects me" → sentiment: 0.8, type: "family"
+- "Learning sword techniques from Master Chen" → sentiment: 0.4, type: "mentor"
+
+Respond with ONLY the JSON object:"""
+
+        try:
+            from langchain.schema import HumanMessage, SystemMessage
+
+            response = await provider.chat(
+                [
+                    SystemMessage(
+                        content="You are an expert at analyzing human relationships and emotions. Provide precise numerical sentiment scores and accurate relationship classifications."
+                    ),
+                    HumanMessage(content=analysis_prompt),
+                ]
+            )
+
+            # Extract JSON from response
+            response_content = (
+                response.content if hasattr(response, "content") else str(response)
+            )
+
+            # Try to parse JSON response
+            import json
+            import re
+
+            # Look for JSON object in response
+            json_match = re.search(r"\{[^}]+\}", response_content, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                analysis = json.loads(json_str)
+
+                # Validate required fields
+                if all(
+                    key in analysis
+                    for key in ["sentiment", "relationship_type", "confidence"]
+                ):
+                    # Ensure sentiment is in valid range
+                    analysis["sentiment"] = max(
+                        -1.0, min(1.0, float(analysis["sentiment"]))
+                    )
+                    analysis["confidence"] = max(
+                        0.0, min(1.0, float(analysis["confidence"]))
+                    )
+
+                    return analysis
+
+            # If JSON parsing fails, fall back to keyword analysis
+            logger.warning(
+                f"Failed to parse LLM relationship analysis: {response_content[:100]}"
+            )
+
+        except Exception as e:
+            logger.warning(f"LLM relationship analysis failed: {e}")
+
+        # Fallback to keyword-based analysis
+        return {
+            "sentiment": self._analyze_relationship_sentiment(content),
+            "relationship_type": self._classify_relationship_type(content),
+            "confidence": 0.3,
+            "reasoning": "Fallback keyword-based analysis",
+        }
