@@ -1258,9 +1258,8 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
         conversation_summary = self._summarize_conversation(messages)
 
         # Return the structured response as an AIMessage for proper parsing
-        # Use a special prefix to identify this as the outcome message
-        outcome_content = f"[OUTCOME_MARKER]{final_response.content or ''}"
-        outcome_message = AIMessage(content=outcome_content)
+        # No longer need the OUTCOME_MARKER prefix - the JSON structure is clear enough
+        outcome_message = AIMessage(content=final_response.content or "")
 
         return {
             "messages": [outcome_message],
@@ -1378,22 +1377,21 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
             # Find the outcome message first, then fall back to last assistant message with content
             logger.debug(f"[Orchestrator] Examining {len(messages)} final messages")
 
-            # First pass: look for messages with outcome marker
+            # First pass: look for messages with JSON outcome structure
             for i, msg in enumerate(reversed(messages)):
                 content = _get_message_content_as_string(msg)
                 logger.debug(
-                    f"[Orchestrator] Message {len(messages)-1-i}: {type(msg).__name__} - content length: {len(content)} - has outcome marker: {content.startswith('[OUTCOME_MARKER]')}"
+                    f"[Orchestrator] Message {len(messages)-1-i}: {type(msg).__name__} - content length: {len(content)} - checking for JSON structure"
                 )
-                if content.startswith("[OUTCOME_MARKER]") and content.strip():
-                    # Remove the marker prefix
-                    clean_content = content[len("[OUTCOME_MARKER]") :].strip()
-                    # Create a temporary message with clean content for parsing
-                    final_message = type(msg)(content=clean_content)
+
+                # Check if this looks like a JSON outcome (has narrative field and proper structure)
+                if content.strip() and self._is_outcome_message(content):
+                    final_message = msg
                     logger.info(
-                        f"[Orchestrator] Selected OUTCOME message: {type(msg).__name__} with {len(clean_content)} chars"
+                        f"[Orchestrator] Selected OUTCOME message: {type(msg).__name__} with {len(content)} chars"
                     )
                     logger.debug(
-                        f"[Orchestrator] Outcome message content preview: {clean_content[:200]}..."
+                        f"[Orchestrator] Outcome message content preview: {content[:200]}..."
                     )
                     break
 
@@ -1990,6 +1988,23 @@ Summary:"""
             logger.info(
                 f"[Parse] Successfully parsed outcome: {list(outcome_data.keys())}"
             )
+
+            # Check if the data is wrapped in an "outcome" key
+            if "outcome" in outcome_data and isinstance(outcome_data["outcome"], dict):
+                logger.debug(
+                    "[Parse] Found wrapped outcome data, extracting inner object"
+                )
+                outcome_data = outcome_data["outcome"]
+
+            # Ensure required fields have defaults if missing
+            if "state_changes" not in outcome_data:
+                logger.debug("[Parse] Missing state_changes field, adding empty list")
+                outcome_data["state_changes"] = []
+
+            if "narrative" not in outcome_data:
+                logger.debug("[Parse] Missing narrative field, adding default")
+                outcome_data["narrative"] = "The story continues..."
+
             return Outcome(**outcome_data)
         except json.JSONDecodeError as e:
             logger.warning(f"[Parse] JSON parsing error: {e}")
@@ -2010,6 +2025,29 @@ Summary:"""
                     logger.info(
                         "[Parse] Successfully extracted and parsed JSON from response"
                     )
+
+                    # Check if the data is wrapped in an "outcome" key
+                    if "outcome" in outcome_data and isinstance(
+                        outcome_data["outcome"], dict
+                    ):
+                        logger.debug(
+                            "[Parse] Found wrapped outcome data in extracted JSON, extracting inner object"
+                        )
+                        outcome_data = outcome_data["outcome"]
+
+                    # Ensure required fields have defaults if missing
+                    if "state_changes" not in outcome_data:
+                        logger.debug(
+                            "[Parse] Missing state_changes field in extracted JSON, adding empty list"
+                        )
+                        outcome_data["state_changes"] = []
+
+                    if "narrative" not in outcome_data:
+                        logger.debug(
+                            "[Parse] Missing narrative field in extracted JSON, adding default"
+                        )
+                        outcome_data["narrative"] = "The story continues..."
+
                     return Outcome(**outcome_data)
                 except Exception as e2:
                     logger.error(f"[Parse] JSON extraction failed: {e2}")
@@ -2797,3 +2835,48 @@ IMPORTANT:
             return True
 
         return False
+
+    def _is_outcome_message(self, content: str) -> bool:
+        """
+        Check if a message content looks like a JSON outcome structure.
+
+        Args:
+            content: Message content to check
+
+        Returns:
+            True if this looks like an outcome message
+        """
+        import json
+
+        try:
+            content = content.strip()
+
+            # Must start with { and end with }
+            if not (content.startswith("{") and content.endswith("}")):
+                return False
+
+            # Try to parse as JSON
+            data = json.loads(content)
+
+            # Check for required outcome fields
+            if not isinstance(data, dict):
+                return False
+
+            # Must have 'narrative' field (key requirement for outcomes)
+            if "narrative" not in data:
+                return False
+
+            # Should have at least one other outcome field
+            outcome_fields = {
+                "state_changes",
+                "visible_dialogue",
+                "roll_requests",
+                "suggested_actions",
+                "hidden_memory_updates",
+            }
+            has_outcome_field = any(field in data for field in outcome_fields)
+
+            return has_outcome_field
+
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            return False
