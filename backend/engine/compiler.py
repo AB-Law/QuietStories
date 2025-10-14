@@ -38,6 +38,9 @@ class ScenarioCompiler:
         # Add memory tool
         self.tools.append(self._create_memory_tool())
 
+        # Add semantic search tool
+        self.tools.append(self._create_semantic_search_tool())
+
     def _create_read_state_tool(self) -> BaseTool:
         """Create tool for reading game state"""
 
@@ -249,13 +252,20 @@ class ScenarioCompiler:
         class AddMemoryTool(BaseTool):
             name: str = "add_memory"
             description: str = (
-                "Record a memory for an entity. Specify entity_id, content, and visibility (private or public)."
+                "Record a memory for an entity. Specify entity_id, content, and visibility (private or public). "
+                "🔗 PRIORITIZE relationship memories when characters interact! "
+                "Use scope='relationship' for interactions between characters. "
+                "Examples: add_memory(entity_id='elena', content='Growing to trust Marcus after the rescue', visibility='private')"
             )
 
             def _run(
-                self, entity_id: str, content: str, visibility: str = "private"
+                self,
+                entity_id: str,
+                content: str,
+                visibility: str = "private",
+                scope: str = "general",
             ) -> str:
-                """Add memory for entity"""
+                """Add memory for entity with optional scope"""
                 try:
                     compiler = getattr(self, "_compiler", None)
                     if not compiler or not hasattr(compiler, "_orchestrator"):
@@ -263,27 +273,127 @@ class ScenarioCompiler:
 
                     orchestrator = compiler._orchestrator
 
-                    # Add to memory
-                    if visibility == "private":
-                        orchestrator.memory.update_private_memory(
-                            entity_id, content, "general"
-                        )
-                    elif visibility == "public":
-                        orchestrator.memory.update_public_memory(entity_id, content)
-                    else:
-                        return f"Unknown visibility: {visibility}"
+                    # Determine related entities for relationship memories
+                    related_entities = []
+                    if scope == "relationship":
+                        # Extract potential entity names from content
+                        entity_names = []
+                        if (
+                            hasattr(orchestrator.spec, "entities")
+                            and orchestrator.spec.entities
+                        ):
+                            entity_names = [
+                                e.get("name", e.get("id", ""))
+                                for e in orchestrator.spec.entities
+                                if e.get("name") or e.get("id")
+                            ]
 
-                    return f"Memory added for {entity_id}: {content[:50]}..."
+                        # Look for other entity names mentioned in the content
+                        for name in entity_names:
+                            if name != entity_id and name.lower() in content.lower():
+                                related_entities.append(name)
+
+                    # Use scoped memory system for better organization
+                    from backend.engine.memory import MemoryVisibility
+
+                    vis_enum = "private" if visibility == "private" else "public"
+
+                    orchestrator.memory.update_scoped_memory(
+                        entity_id=entity_id,
+                        content=content,
+                        scope=scope,
+                        visibility=vis_enum,
+                        related_entities=related_entities if related_entities else None,
+                    )
+
+                    scope_indicator = f" ({scope})" if scope != "general" else ""
+                    return f"Memory added for {entity_id}{scope_indicator}: {content[:50]}..."
                 except Exception as e:
                     return f"Error adding memory: {e}"
 
             async def _arun(
-                self, entity_id: str, content: str, visibility: str = "private"
+                self,
+                entity_id: str,
+                content: str,
+                visibility: str = "private",
+                scope: str = "general",
             ) -> str:
                 """Async version of _run"""
-                return self._run(entity_id, content, visibility)
+                return self._run(entity_id, content, visibility, scope)
 
         tool = AddMemoryTool()
+        tool._compiler = self  # type: ignore
+        return tool
+
+    def _create_semantic_search_tool(self) -> BaseTool:
+        """Create tool for semantic memory search"""
+
+        class SemanticSearchTool(BaseTool):
+            name: str = "search_memories"
+            description: str = (
+                "Search memories using semantic similarity. Query by meaning rather than exact keywords. "
+                "Args: query (required), entity_id (optional), scope (optional), limit (optional, default 5), threshold (optional, default 0.1)"
+            )
+
+            def _run(
+                self,
+                query: str,
+                entity_id: Optional[str] = None,
+                scope: Optional[str] = None,
+                limit: int = 5,
+                threshold: float = 0.1,
+            ) -> str:
+                """Search memories semantically"""
+                try:
+                    compiler = getattr(self, "_compiler", None)
+                    if not compiler or not hasattr(compiler, "_orchestrator"):
+                        return "Error: No orchestrator available"
+
+                    orchestrator = compiler._orchestrator
+
+                    # Search memories
+                    results = orchestrator.memory.search_memories_semantic(
+                        query=query,
+                        entity_id=entity_id,
+                        scope=scope,
+                        limit=limit,
+                        threshold=threshold,
+                    )
+
+                    if not results:
+                        return f"No memories found for query: {query}"
+
+                    # Format results
+                    result_lines = [
+                        f"Found {len(results)} relevant memories for '{query}':"
+                    ]
+                    for i, result in enumerate(results, 1):
+                        similarity = result.get("similarity", 0)
+                        content = result.get("content", "")
+                        metadata = result.get("metadata", {})
+
+                        result_lines.append(
+                            f"{i}. [{metadata.get('scope', 'unknown')}] {content[:100]}{'...' if len(content) > 100 else ''} "
+                            f"(similarity: {similarity:.3f}, entity: {metadata.get('entity_id', 'unknown')})"
+                        )
+
+                    return "\n".join(result_lines)
+
+                except Exception as e:
+                    return f"Error searching memories: {e}"
+
+            async def _arun(
+                self,
+                query: str,
+                entity_id: Optional[str] = None,
+                scope: Optional[str] = None,
+                limit: int = 5,
+                threshold: float = 0.1,
+            ) -> str:
+                """Async version of _run"""
+                return self._run(query, entity_id, scope, limit, threshold)
+
+        tool = SemanticSearchTool()
         tool._compiler = self  # type: ignore
         return tool
 

@@ -341,3 +341,5 @@ random/data/*.db-shm
 random/
 .copilot-tracking/
 planning-mode.chatmode.md
+.cursor/
+data/

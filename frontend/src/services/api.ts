@@ -79,6 +79,7 @@ export interface TurnResponse {
     visible_dialogue?: Array<{ entity_id: string; utterance: string }>;
     state_changes: Array<{ op: string; path: string; value?: unknown }>;
     roll_requests?: Array<{ kind: string; target?: string; difficulty?: number }>;
+    suggested_actions?: string[];
   };
 }
 
@@ -104,6 +105,22 @@ export interface Memory {
 export interface MemoryData {
   private_memory: Record<string, Memory[]>;
   public_memory: Record<string, Memory[]>;
+}
+
+export interface RelationshipData {
+  entity_a: string;
+  entity_b: string;
+  sentiment: number;
+  relationship_type: string;
+  memory_count: number;
+  last_interaction: number;
+}
+
+export interface RelationshipsResponse {
+  session_id: string;
+  relationships: Record<string, RelationshipData>;
+  entity_count: number;
+  total_relationships: number;
 }
 
 export interface PromptEnrichRequest {
@@ -241,6 +258,16 @@ class ApiService {
 
     if (!response.ok) {
       throw new Error(`Failed to get session memories: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  async getRelationships(sessionId: string): Promise<RelationshipsResponse> {
+    const response = await fetch(`${this.baseUrl}/sessions/${sessionId}/relationships`);
+
+    if (!response.ok) {
+      throw new Error(`Failed to get relationships: ${response.statusText}`);
     }
 
     return response.json();

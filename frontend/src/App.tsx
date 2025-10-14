@@ -3,6 +3,7 @@ import { Layout } from './components/Layout';
 import { Home } from './components/Home';
 import { Chat } from './components/Chat';
 import { AdminPanel } from './components/AdminPanel';
+import { MarkdownTest } from './components/MarkdownTest';
 
 function App() {
   return (
@@ -12,6 +13,7 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/chat" element={<Chat />} />
           <Route path="/admin" element={<AdminPanel />} />
+          <Route path="/markdown-test" element={<MarkdownTest />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Layout>

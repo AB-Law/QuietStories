@@ -16,12 +16,16 @@ class Settings(BaseSettings):
     model_provider: Literal["openai", "ollama", "generic"] = Field(default="openai")
     openai_api_base: str = Field(default="https://api.openai.com/v1")
     openai_api_key: str = Field(default="")
-    model_name: str = Field(default="gpt-4")
+    model_name: str = Field(default="gpt-5-nano")
 
     # Server Configuration
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8000)
     debug: bool = Field(default=False)
+    # Verbose logging settings for debugging
+    verbose_orchestrator: bool = True
+    log_message_sequences: bool = True
+    orchestrator_recursion_limit: int = Field(default=50)
 
     # Monte Carlo Configuration
     monte_carlo_turns: int = Field(default=100)

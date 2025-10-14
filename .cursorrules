@@ -1,0 +1,53 @@
+# Cursor Rules for QuietStories Project
+
+## Commit Message Format
+All commits must follow conventional commit format:
+```
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+### Types
+- `feat:` - A new feature
+- `fix:` - A bug fix
+- `docs:` - Documentation only changes
+- `style:` - Changes that do not affect the meaning of the code (white-space, formatting, missing semi-colons, etc)
+- `refactor:` - A code change that neither fixes a bug nor adds a feature
+- `perf:` - A code change that improves performance
+- `test:` - Adding missing tests or correcting existing tests
+- `chore:` - Changes to the build process or auxiliary tools and libraries such as documentation generation
+
+### Description Rules
+- Use imperative mood ("add" not "added")
+- Keep to 1-3 lines maximum
+- Start with lowercase letter
+- No period at the end
+
+### Examples
+```
+feat: add streaming narrative generation for better UX
+
+fix: resolve memory tool underutilization with reflection phase
+
+chore: update prompts with explicit tool usage guidance
+
+refactor: implement scoped memory types in memory manager
+
+docs: add API documentation for roll resolution system
+```
+
+### Scope (optional)
+- Use when changes affect a specific component
+- Examples: `memory`, `orchestrator`, `frontend`, `api`, `docs`
+
+### Breaking Changes
+- Use `BREAKING CHANGE:` footer for breaking changes
+- Format: `BREAKING CHANGE: <description>`
+
+### Multi-line Commits
+- Keep first line under 72 characters
+- Add body with detailed explanation if needed
+- Use bullet points for multiple changes

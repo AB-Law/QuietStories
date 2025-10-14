@@ -57,6 +57,7 @@ class Session(Base):
         entities: Current entity/character list as JSON
         private_memory: Private entity memories as JSON
         public_memory: Public entity memories as JSON
+        scenario_spec: Cached scenario spec for performance (optional)
         status: Session status (active, completed, failed)
         created_at: Timestamp when session was created
         updated_at: Timestamp when session was last updated
@@ -74,6 +75,7 @@ class Session(Base):
     entities = Column(JSON, nullable=False, default=list)
     private_memory = Column(JSON, nullable=False, default=dict)
     public_memory = Column(JSON, nullable=False, default=dict)
+    scenario_spec = Column(JSON, nullable=True)
     status = Column(String, nullable=False, default="active")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(

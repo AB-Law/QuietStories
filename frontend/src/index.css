@@ -118,3 +118,110 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Custom narrative formatting */
+.narrative-content {
+  font-family: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  line-height: 1.6;
+  hyphens: auto;
+}
+
+.narrative-content p {
+  margin-bottom: 0.75rem;
+}
+
+.narrative-content p:last-child {
+  margin-bottom: 0;
+}
+
+/* Dialogue styling */
+.narrative-content .dialogue {
+  position: relative;
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+  background: rgba(var(--muted), 0.3);
+  border-left: 3px solid rgb(var(--primary));
+  border-radius: 0 0.375rem 0.375rem 0;
+  font-style: italic;
+}
+
+.narrative-content .dialogue::before {
+  content: '"';
+  position: absolute;
+  left: -0.5rem;
+  top: -0.25rem;
+  font-size: 2rem;
+  color: rgb(var(--primary));
+  font-weight: bold;
+  background: rgb(var(--background));
+  padding: 0 0.25rem;
+}
+
+/* Character names in dialogue */
+.narrative-content .character-name {
+  font-weight: 600;
+  color: rgb(var(--primary));
+  font-style: normal;
+}
+
+/* Narrative actions */
+.narrative-content .narrative-action {
+  font-style: italic;
+  color: rgb(var(--muted-foreground));
+  opacity: 0.8;
+}
+
+/* Enhanced blockquote styling */
+.narrative-content blockquote {
+  font-style: italic;
+  margin: 1rem 0;
+  padding: 1rem;
+  background: rgba(var(--muted), 0.2);
+  border-left: 4px solid rgb(var(--primary));
+  border-radius: 0 0.5rem 0.5rem 0;
+  position: relative;
+}
+
+.narrative-content blockquote::before {
+  content: '"';
+  position: absolute;
+  left: -0.75rem;
+  top: -0.5rem;
+  font-size: 3rem;
+  color: rgb(var(--primary));
+  background: rgb(var(--background));
+  padding: 0 0.25rem;
+  line-height: 1;
+}
+
+/* Responsive typography */
+@media (max-width: 640px) {
+  .narrative-content {
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+
+  .narrative-content .dialogue {
+    padding: 0.5rem 0.75rem;
+    margin: 0.75rem 0;
+  }
+
+  .narrative-content blockquote {
+    padding: 0.75rem;
+    margin: 0.75rem 0;
+  }
+}
+
+@media (min-width: 768px) {
+  .narrative-content {
+    font-size: 1rem;
+    line-height: 1.6;
+  }
+}
+
+@media (min-width: 1024px) {
+  .narrative-content {
+    font-size: 1.0625rem;
+    line-height: 1.7;
+  }
+}
