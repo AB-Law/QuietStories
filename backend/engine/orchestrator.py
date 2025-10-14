@@ -345,6 +345,20 @@ class TurnOrchestrator:
         # Get recent context for reflection
         recent_context = self._build_context_from_state(state)
 
+        # Check if we should trigger a comprehensive relationship review
+        should_review_relationships = self._should_trigger_relationship_review()
+
+        relationship_prompt = ""
+        if should_review_relationships:
+            relationship_prompt = f"""
+🔗 **RELATIONSHIP REVIEW REQUIRED**:
+Since it's been several turns, provide a comprehensive review of character relationships:
+- How have relationships evolved recently?
+- What new bonds, tensions, or conflicts have emerged?
+- Record relationship memories for each significant character dynamic using add_memory with scope="relationship"
+- Focus especially on trust changes, emotional developments, and social dynamics
+"""
+
         return f"""REFLECTION PHASE: Analyze the recent outcome and update memories accordingly.
 
 Recent Outcome:
@@ -354,6 +368,8 @@ Current Context:
 - Turn: {recent_context.get('turn', 'unknown')}
 - Entities: {len(recent_context.get('entities', []))} active
 - Location: {recent_context.get('state', {}).get('location', 'unknown')}
+
+{relationship_prompt}
 
 Based on this outcome, consider:
 1. **Character Memories**: What should NPCs remember about these events?
@@ -366,6 +382,14 @@ Use memory tools to record these insights. Focus on:
 - Relationship developments (trust, affection, rivalries)
 - World changes that affect future decisions
 - Key information that might be relevant later
+
+**RELATIONSHIP TRACKING PRIORITY**:
+When characters interact, always record relationship memories using:
+add_memory(entity_id="character_name", content="relationship insight", visibility="private")
+
+Examples:
+- add_memory(entity_id="elena", content="Growing suspicious of Marcus after his evasive answers about the artifact", visibility="private")
+- add_memory(entity_id="marcus", content="Feeling grateful to Sarah for defending him during the confrontation", visibility="private")
 
 IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual response - only call the add_memory tool for each insight you want to record."""
 
@@ -1121,6 +1145,9 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
                 f"[Orchestrator] Processing {len(outcome.emotional_state_updates)} emotional state updates..."
             )
             self._update_emotional_states(outcome.emotional_state_updates)
+
+        # Automatic relationship detection - analyze narrative for relationship changes
+        await self._analyze_narrative_for_relationships(outcome, user_input)
 
         # Increment turn counter
         self.memory.increment_turn()
@@ -2052,3 +2079,191 @@ Summary:"""
         except Exception as e:
             logger.error(f"[Orchestrator] Tool {tool_name} execution error: {e}")
             raise
+
+    async def _analyze_narrative_for_relationships(
+        self, outcome: Outcome, user_input: Optional[str] = None
+    ):
+        """
+        Automatically analyze the narrative content for relationship implications.
+
+        This method uses the LLM to extract relationship insights from the narrative
+        and automatically record relevant relationship memories.
+
+        Args:
+            outcome: The outcome containing the narrative to analyze
+            user_input: Optional user input that triggered this turn
+        """
+        if not outcome.narrative or len(outcome.narrative.strip()) < 50:
+            # Skip analysis for very short narratives
+            return
+
+        logger.debug(
+            "[Orchestrator] 🔍 Analyzing narrative for relationship changes..."
+        )
+
+        # Get entity names for better analysis
+        entity_names = []
+        if hasattr(self.spec, "entities") and self.spec.entities:
+            entity_names = [
+                entity.get("name", entity.get("id", ""))
+                for entity in self.spec.entities
+                if entity.get("name") or entity.get("id")
+            ]
+
+        # Construct analysis prompt
+        analysis_prompt = f"""Analyze this narrative for character relationship changes and interactions.
+
+NARRATIVE:
+{outcome.narrative}
+
+USER ACTION (if any): {user_input or 'None'}
+
+KNOWN CHARACTERS: {', '.join(entity_names[:10]) if entity_names else 'None specified'}
+
+Extract any relationship-relevant information and identify:
+1. Which characters interacted or were mentioned together
+2. What the nature of their interaction was (positive, negative, neutral)
+3. Any changes in how characters feel about each other
+4. Any new relationships formed or existing ones that changed
+
+For each significant relationship moment, respond ONLY with add_memory tool calls.
+Use the "relationship" scope when calling add_memory for relationship-specific memories.
+
+Format: add_memory(entity_id="character_name", content="relationship insight", visibility="private")
+
+Example:
+- If Sarah shows trust in Marcus: add_memory(entity_id="sarah", content="Growing to trust Marcus after he helped her in the market", visibility="private")
+- If Marcus becomes suspicious of Elena: add_memory(entity_id="marcus", content="Becoming suspicious of Elena's motives regarding the ancient artifact", visibility="private")
+
+IMPORTANT:
+- Only call add_memory if there are genuine relationship developments
+- Focus on emotional changes, trust shifts, new alliances, conflicts, or bonding moments
+- Don't record trivial social interactions
+- Use the actual character names/IDs from the story
+- Don't provide any text response - ONLY use tool calls if relationships changed"""
+
+        try:
+            # Use the LLM to analyze the narrative
+            response = await self.provider.chat(
+                [
+                    SystemMessage(
+                        content="You are an expert at analyzing character relationships in narratives. Extract relationship insights and record them using the add_memory tool."
+                    ),
+                    HumanMessage(content=analysis_prompt),
+                ]
+            )
+
+            # Check if the response contains tool calls or structured information
+            response_content = (
+                response.content if hasattr(response, "content") else str(response)
+            )
+
+            if response_content and len(response_content.strip()) > 10:
+                # If LLM provided relationship insights, try to extract them
+                logger.debug(
+                    f"[Orchestrator] 🔗 Relationship analysis response: {response_content[:200]}..."
+                )
+
+                # Look for relationship patterns in the response
+                await self._extract_relationships_from_analysis(
+                    response_content, entity_names
+                )
+            else:
+                logger.debug(
+                    "[Orchestrator] No significant relationships detected in narrative"
+                )
+
+        except Exception as e:
+            logger.warning(f"[Orchestrator] Relationship analysis failed: {e}")
+            # Continue silently - this is an enhancement, not critical functionality
+
+    async def _extract_relationships_from_analysis(
+        self, analysis_content: str, known_entities: list
+    ):
+        """
+        Extract relationship information from LLM analysis and store as memories.
+
+        Args:
+            analysis_content: The LLM's analysis of relationships
+            known_entities: List of known entity names
+        """
+        import re
+
+        # Look for entity pairs mentioned together (simple heuristic)
+        entity_pairs = []
+        for i, entity_a in enumerate(known_entities):
+            for entity_b in known_entities[i + 1 :]:
+                if (
+                    entity_a.lower() in analysis_content.lower()
+                    and entity_b.lower() in analysis_content.lower()
+                ):
+                    entity_pairs.append((entity_a, entity_b))
+
+        # For each entity pair found, create a relationship memory
+        for entity_a, entity_b in entity_pairs[
+            :3
+        ]:  # Limit to top 3 pairs to avoid spam
+            # Extract the relevant context about this pair
+            sentences = analysis_content.split(".")
+            relevant_context = []
+
+            for sentence in sentences:
+                if (
+                    entity_a.lower() in sentence.lower()
+                    and entity_b.lower() in sentence.lower()
+                ):
+                    relevant_context.append(sentence.strip())
+
+            if relevant_context:
+                relationship_summary = ". ".join(
+                    relevant_context[:2]
+                )  # Take first 2 relevant sentences
+
+                # Add memory for both entities
+                try:
+                    self.memory.update_scoped_memory(
+                        entity_id=entity_a,
+                        content=f"Interaction with {entity_b}: {relationship_summary}",
+                        scope="relationship",
+                        visibility="private",
+                        related_entities=[entity_b],
+                    )
+
+                    self.memory.update_scoped_memory(
+                        entity_id=entity_b,
+                        content=f"Interaction with {entity_a}: {relationship_summary}",
+                        scope="relationship",
+                        visibility="private",
+                        related_entities=[entity_a],
+                    )
+
+                    logger.debug(
+                        f"[Orchestrator] 💕 Auto-recorded relationship: {entity_a} ↔ {entity_b}"
+                    )
+
+                except Exception as e:
+                    logger.warning(
+                        f"[Orchestrator] Failed to record relationship memory: {e}"
+                    )
+
+    def _should_trigger_relationship_review(self) -> bool:
+        """
+        Determine if it's time for a comprehensive relationship review.
+
+        Returns:
+            True if a relationship review should be triggered
+        """
+        turn_count = self.memory.get_turn_count()
+
+        # Trigger every 5 turns, or if we have many entities but few relationships
+        if turn_count % 5 == 0:
+            return True
+
+        # Check if we have entities but no relationships tracked
+        entity_count = len(self.spec.entities) if self.spec.entities else 0
+        relationship_count = len(self.memory.get_relationship_summary())
+
+        if entity_count >= 3 and relationship_count == 0 and turn_count >= 3:
+            return True
+
+        return False
