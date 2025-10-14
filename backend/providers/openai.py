@@ -86,8 +86,9 @@ class OpenAIProvider(BaseProvider):
 
     async def _handle_streaming_response(self, llm, messages, tools, **kwargs):
         """Handle streaming responses"""
-        # For now, return the LLM for streaming
-        # This can be enhanced with proper streaming support
+        # Return the LLM configured for streaming
+        if tools:
+            return llm.bind_tools(tools)
         return llm
 
     async def health_check(self) -> bool:
