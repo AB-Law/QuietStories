@@ -241,9 +241,9 @@ class ApiService {
                 // Final outcome - we could yield this as well if needed
                 return;
               }
-            } catch {
+            } catch (error) {
               // Ignore malformed JSON lines
-              console.warn('Failed to parse streaming data:', data);
+              console.warn('Failed to parse streaming data:', data, error);
             }
           }
         }
