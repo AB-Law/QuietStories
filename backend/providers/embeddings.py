@@ -133,10 +133,16 @@ def _create_lmstudio_embeddings() -> Optional[Embeddings]:
         from langchain_openai import OpenAIEmbeddings
         from pydantic import SecretStr
 
-        # Use embedding_api_base if set, otherwise fall back to LM Studio default
-        api_base = settings.embedding_api_base or settings.openai_api_base
+        # Use embedding_api_base if set, otherwise lmstudio_api_base, then fall back to openai_api_base
+        api_base = (
+            settings.embedding_api_base
+            or settings.lmstudio_api_base
+            or settings.openai_api_base
+        )
+
+        # If still using OpenAI default, switch to LM Studio default
         if api_base == "https://api.openai.com/v1":
-            api_base = "http://localhost:5101/v1"  # LM Studio default
+            api_base = "http://localhost:1234/v1"  # LM Studio default port
 
         # LM Studio doesn't require an API key
         api_key = settings.openai_api_key or "lm-studio"

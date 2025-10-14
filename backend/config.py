@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="")
     model_name: str = Field(default="gpt-5-nano")
 
+    # LM Studio specific configuration
+    lmstudio_api_base: Optional[str] = Field(
+        default=None,
+        description="LM Studio API base URL (e.g., http://localhost:1234/v1). If not set, uses openai_api_base",
+    )
+
     # Embedding Provider Configuration (for semantic memory search)
     # Options: "openai", "ollama", "lmstudio", "none"
     # If not set, defaults to match model_provider (or "none" if model_provider doesn't support embeddings)

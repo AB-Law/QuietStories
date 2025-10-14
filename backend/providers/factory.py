@@ -28,14 +28,17 @@ def create_provider() -> BaseProvider:
             model_name=settings.model_name,
         )
     elif settings.model_provider == "lmstudio":
-        # LMStudio uses default localhost endpoint if not specified
-        api_base = settings.openai_api_base
+        # Use lmstudio_api_base if set, otherwise fall back to openai_api_base
+        api_base = settings.lmstudio_api_base or settings.openai_api_base
+
+        # If still using OpenAI default, switch to LM Studio default
         if api_base == "https://api.openai.com/v1":
-            api_base = "http://localhost:5101/v1"
-        
+            api_base = "http://localhost:1234/v1"  # LM Studio default port
+
         return LMStudioProvider(
             api_base=api_base,
-            api_key=settings.openai_api_key or "lm-studio",  # LMStudio doesn't require key
+            api_key=settings.openai_api_key
+            or "lm-studio",  # LMStudio doesn't require key
             model_name=settings.model_name,
         )
     elif settings.model_provider == "generic":
