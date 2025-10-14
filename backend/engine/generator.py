@@ -34,102 +34,115 @@ class ScenarioGenerator:
             HumanMessage(content=user_prompt),
         ]
 
-        try:
-            # Use LangChain's structured output for reliable JSON generation
-            # Ref: https://python.langchain.com/docs/concepts/structured_outputs/
-            logger.info("Using structured output to generate ScenarioSpec...")
-            llm = self.provider.llm
-            structured_llm = llm.with_structured_output(
-                ScenarioSpec, method="json_mode"
-            )
-            logger.info("Invoking LLM with structured output...")
-            scenario_spec = await structured_llm.ainvoke(messages)
-            logger.info(f"Successfully generated scenario: {scenario_spec.name}")
+        # Check if provider supports structured output efficiently
+        # Local providers (LMStudio, Ollama) have slow structured output, so skip it
+        provider_name = self.provider.__class__.__name__
+        supports_structured = provider_name not in [
+            "LMStudioProvider",
+            "OllamaProvider",
+        ]
 
-            # Ensure we have a valid seed
-            if not scenario_spec.seed:
-                scenario_spec.seed = random.randint(1, 1000000)
-
-            return scenario_spec
-
-        except Exception as e:
-            # Fallback: some providers (e.g., strict JSON mode) reject dynamic object fields
-            # like Action.params/JSONLogic. Fall back to robust JSON parsing flow.
-            logger.error(
-                f"Structured output failed, falling back to manual parsing: {type(e).__name__}: {str(e)}",
-                exc_info=True,
-            )
-
-            # ---------- Fallback path: standard chat + robust JSON extraction ----------
-            messages = [
-                SystemMessage(content=SCENARIO_GENERATION_SYSTEM),
-                HumanMessage(content=user_prompt),
-            ]
-
-            # Get response from LLM
-            response = await self.provider.chat(messages)
-            content = response.content
-
-            import logging
-            import re
-
-            logger = logging.getLogger(__name__)
-            logger.info(f"LLM response length: {len(content)}")
-            logger.info(f"LLM response first 300 chars: {content[:300]}")
-
-            # Clean the response - remove markdown code blocks and other formatting
-            content = content.strip()
-
-            # Remove markdown code blocks
-            if "```" in content:
-                # Extract content between code fences
-                match = re.search(r"```(?:json)?\s*\n(.*?)\n```", content, re.DOTALL)
-                if match:
-                    content = match.group(1)
-                    logger.info("Extracted JSON from markdown code block")
-                else:
-                    # Fallback: remove all lines with ```
-                    lines = [
-                        line
-                        for line in content.split("\n")
-                        if not line.strip().startswith("```")
-                    ]
-                    content = "\n".join(lines)
-                    logger.info("Removed markdown code fence lines")
-
-            # Try to parse JSON
+        if supports_structured:
             try:
-                spec_data = json.loads(content)
-                logger.info("Successfully parsed JSON from fallback response")
-            except json.JSONDecodeError as e2:
-                logger.warning(f"Initial JSON parse failed in fallback: {e2}")
-                # Try to extract JSON from response
-                start_idx = content.find("{")
-                end_idx = content.rfind("}") + 1
-                if start_idx != -1 and end_idx > start_idx:
-                    json_str = content[start_idx:end_idx]
-                    logger.info(
-                        f"Extracted JSON substring (length {len(json_str)}) in fallback"
-                    )
-                    spec_data = json.loads(json_str)
-                    logger.info("Successfully parsed extracted JSON in fallback")
-                else:
-                    logger.error(
-                        f"No valid JSON found in fallback. Content: {content[:500]}"
-                    )
-                    raise Exception("No valid JSON found in LLM response")
+                # Use LangChain's structured output for reliable JSON generation
+                # Ref: https://python.langchain.com/docs/concepts/structured_outputs/
+                logger.info("Using structured output to generate ScenarioSpec...")
+                llm = self.provider.llm
+                structured_llm = llm.with_structured_output(
+                    ScenarioSpec, method="json_mode"
+                )
+                logger.info("Invoking LLM with structured output...")
+                scenario_spec = await structured_llm.ainvoke(messages)
+                logger.info(f"Successfully generated scenario: {scenario_spec.name}")
 
-            # Auto-fix common LLM mistakes with field names
-            spec_data = self._fix_field_names(spec_data)
+                # Ensure we have a valid seed
+                if not scenario_spec.seed:
+                    scenario_spec.seed = random.randint(1, 1000000)
 
-            # Validate the scenario spec
-            scenario_spec = validate_scenario_spec(spec_data)
+                return scenario_spec
 
-            # Ensure we have a valid seed
-            if not scenario_spec.seed:
-                scenario_spec.seed = random.randint(1, 1000000)
+            except Exception as e:
+                # Fallback: some providers (e.g., strict JSON mode) reject dynamic object fields
+                # like Action.params/JSONLogic. Fall back to robust JSON parsing flow.
+                logger.error(
+                    f"Structured output failed, falling back to manual parsing: {type(e).__name__}: {str(e)}",
+                    exc_info=True,
+                )
+        else:
+            logger.info(
+                "Skipping structured output for local provider, using manual parsing"
+            )
 
-            return scenario_spec
+        # ---------- Fallback path: standard chat + robust JSON extraction ----------
+        messages = [
+            SystemMessage(content=SCENARIO_GENERATION_SYSTEM),
+            HumanMessage(content=user_prompt),
+        ]
+
+        # Get response from LLM
+        response = await self.provider.chat(messages)
+        content = response.content
+
+        import logging
+        import re
+
+        logger = logging.getLogger(__name__)
+        logger.info(f"LLM response length: {len(content)}")
+        logger.info(f"LLM response first 300 chars: {content[:300]}")
+
+        # Clean the response - remove markdown code blocks and other formatting
+        content = content.strip()
+
+        # Remove markdown code blocks
+        if "```" in content:
+            # Extract content between code fences
+            match = re.search(r"```(?:json)?\s*\n(.*?)\n```", content, re.DOTALL)
+            if match:
+                content = match.group(1)
+                logger.info("Extracted JSON from markdown code block")
+            else:
+                # Fallback: remove all lines with ```
+                lines = [
+                    line
+                    for line in content.split("\n")
+                    if not line.strip().startswith("```")
+                ]
+                content = "\n".join(lines)
+                logger.info("Removed markdown code fence lines")
+
+        # Try to parse JSON
+        try:
+            spec_data = json.loads(content)
+            logger.info("Successfully parsed JSON from fallback response")
+        except json.JSONDecodeError as e2:
+            logger.warning(f"Initial JSON parse failed in fallback: {e2}")
+            # Try to extract JSON from response
+            start_idx = content.find("{")
+            end_idx = content.rfind("}") + 1
+            if start_idx != -1 and end_idx > start_idx:
+                json_str = content[start_idx:end_idx]
+                logger.info(
+                    f"Extracted JSON substring (length {len(json_str)}) in fallback"
+                )
+                spec_data = json.loads(json_str)
+                logger.info("Successfully parsed extracted JSON in fallback")
+            else:
+                logger.error(
+                    f"No valid JSON found in fallback. Content: {content[:500]}"
+                )
+                raise Exception("No valid JSON found in LLM response")
+
+        # Auto-fix common LLM mistakes with field names
+        spec_data = self._fix_field_names(spec_data)
+
+        # Validate the scenario spec
+        scenario_spec = validate_scenario_spec(spec_data)
+
+        # Ensure we have a valid seed
+        if not scenario_spec.seed:
+            scenario_spec.seed = random.randint(1, 1000000)
+
+        return scenario_spec
 
     def _fix_field_names(self, spec_data: Dict[str, Any]) -> Dict[str, Any]:
         """Fix common LLM mistakes with field names"""

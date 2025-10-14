@@ -168,7 +168,7 @@ class LMStudioProvider(BaseProvider):
             )
 
         except Exception as e:
-            self.logger.error(f"[LMStudio] Error: {e}")
+            self.logger.exception(f"[LMStudio] Error: {e}")
             raise Exception(
                 f"LMStudio API error: {e}. Make sure LMStudio is running on {self.api_base}"
             )
@@ -222,6 +222,6 @@ class LMStudioProvider(BaseProvider):
             return True
 
         except Exception as e:
-            self.logger.error(f"[LMStudio] Health check failed: {e}")
+            self.logger.exception(f"[LMStudio] Health check failed: {e}")
             self.logger.error(f"Make sure LMStudio is running on {self.api_base}")
             return False
