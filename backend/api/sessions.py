@@ -1015,11 +1015,144 @@ async def get_session_performance(session_id: str):
     ):
         semantic_stats = orchestrator.memory.semantic_search.get_stats()
 
+        return {
+            "session_id": session_id,
+            "turn_count": session.get("turn", 0),
+            "created_at": session.get("created_at"),
+            "memory_stats": memory_stats,
+            "semantic_search_stats": semantic_stats,
+            "relationship_graph_stats": orchestrator.memory.get_graph_summary(),
+        }
+
+
+@router.post("/{session_id}/enrichment/process")
+async def process_relationship_enrichment(
+    session_id: str, task_id: Optional[str] = None
+):
+    """
+    Process queued relationship enrichment analysis.
+
+    This endpoint triggers background processing of queued relationship
+    enrichment tasks using LLM analysis for more accurate relationship detection.
+
+    Args:
+        session_id: Session identifier
+        task_id: Optional specific task ID to process (processes all if not specified)
+
+    Returns:
+        Processing results and status
+    """
+    logger.info(f"Processing relationship enrichment for session {session_id}")
+
+    session = db.get_session(session_id)
+    if not session:
+        logger.warning(f"Session not found: {session_id}")
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Get orchestrator to access memory system
+    if session_id not in orchestrators_db:
+        from backend.engine.orchestrator import TurnOrchestrator
+        from backend.schemas import ScenarioSpec
+
+        spec = ScenarioSpec(**session["scenario_spec"])
+        temp_orchestrator = TurnOrchestrator(spec, session_id, db)
+        orchestrators_db[session_id] = temp_orchestrator
+
+    orchestrator = orchestrators_db[session_id]
+
+    # Get queued tasks
+    queued_tasks = orchestrator.memory.get_enrichment_queue_status()
+
+    if not queued_tasks:
+        return {
+            "session_id": session_id,
+            "message": "No enrichment tasks queued",
+            "processed": 0,
+            "results": [],
+        }
+
+    # Filter tasks if specific task_id provided
+    if task_id:
+        queued_tasks = [task for task in queued_tasks if task["id"] == task_id]
+        if not queued_tasks:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+    # Process tasks
+    results = []
+    for task in queued_tasks:
+        if task["status"] == "queued":
+            success = await orchestrator.memory.relationship_graph.process_enrichment_analysis(
+                task["id"], orchestrator.provider
+            )
+            results.append(
+                {
+                    "task_id": task["id"],
+                    "success": success,
+                    "status": "completed" if success else "failed",
+                }
+            )
+
+    # Clear completed tasks
+    cleared_count = orchestrator.memory.clear_completed_enrichments()
+
     return {
         "session_id": session_id,
-        "turn_count": session.get("turn", 0),
-        "created_at": session.get("created_at"),
-        "memory_stats": memory_stats,
-        "semantic_search_stats": semantic_stats,
-        "relationship_graph_stats": orchestrator.memory.get_graph_summary(),
+        "processed": len(results),
+        "results": results,
+        "cleared_completed": cleared_count,
+        "remaining_queued": len(orchestrator.memory.get_enrichment_queue_status()),
+    }
+
+
+@router.get("/{session_id}/enrichment/queue")
+async def get_enrichment_queue(session_id: str):
+    """
+    Get status of queued relationship enrichment tasks.
+
+    Returns information about pending, processing, and completed
+    relationship enrichment analysis tasks.
+
+    Args:
+        session_id: Session identifier
+
+    Returns:
+        Queue status and task information
+    """
+    logger.debug(f"Retrieving enrichment queue for session {session_id}")
+
+    session = db.get_session(session_id)
+    if not session:
+        logger.warning(f"Session not found: {session_id}")
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Get orchestrator to access memory system
+    if session_id not in orchestrators_db:
+        from backend.engine.orchestrator import TurnOrchestrator
+        from backend.schemas import ScenarioSpec
+
+        spec = ScenarioSpec(**session["scenario_spec"])
+        temp_orchestrator = TurnOrchestrator(spec, session_id, db)
+        orchestrators_db[session_id] = temp_orchestrator
+
+    orchestrator = orchestrators_db[session_id]
+
+    # Get queue status
+    queue_status = orchestrator.memory.get_enrichment_queue_status()
+
+    # Group by status
+    queued = [task for task in queue_status if task["status"] == "queued"]
+    processing = [task for task in queue_status if task["status"] == "processing"]
+    completed = [task for task in queue_status if task["status"] == "completed"]
+    failed = [task for task in queue_status if task["status"] == "failed"]
+
+    return {
+        "session_id": session_id,
+        "total_tasks": len(queue_status),
+        "status_summary": {
+            "queued": len(queued),
+            "processing": len(processing),
+            "completed": len(completed),
+            "failed": len(failed),
+        },
+        "tasks": queue_status,
     }

@@ -193,6 +193,66 @@ class ApiService {
     return response.json();
   }
 
+  async *processTurnStreaming(sessionId: string, request: TurnRequest): AsyncIterableIterator<string> {
+    const response = await fetch(`${this.baseUrl}/sessions/${sessionId}/turns/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
+      },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to process turn: ${response.statusText}`);
+    }
+
+    if (!response.body) {
+      throw new Error('Response body is null');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6); // Remove 'data: ' prefix
+
+            if (data.trim() === '[DONE]') {
+              return; // End of stream
+            }
+
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.type === 'narrative_chunk') {
+                yield parsed.content;
+              } else if (parsed.type === 'complete') {
+                // Final outcome - we could yield this as well if needed
+                return;
+              }
+            } catch {
+              // Ignore malformed JSON lines
+              console.warn('Failed to parse streaming data:', data);
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
   // Scenario Management
   async generateScenario(description: string): Promise<ScenarioGenerateResponse> {
     const response = await fetch(`${this.baseUrl}/scenarios/generate`, {
