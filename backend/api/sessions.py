@@ -781,3 +781,245 @@ async def get_cache_stats():
     stats = get_cache_statistics()
 
     return {"cache_stats": stats, "timestamp": datetime.now().isoformat()}
+
+
+@router.get("/{session_id}/relationships/{entity_id}")
+async def get_entity_relationships(session_id: str, entity_id: str):
+    """
+    Get relationship summary for a specific entity in a session.
+
+    Returns detailed relationship information including:
+    - Outgoing and incoming relationships
+    - Relationship types and sentiment scores
+    - Strongest relationships
+
+    Args:
+        session_id: Session identifier
+        entity_id: Entity identifier to get relationships for
+
+    Returns:
+        Dictionary with entity relationship summary
+
+    Raises:
+        HTTPException 404: Session or entity not found
+    """
+    logger.debug(
+        f"Retrieving relationships for entity {entity_id} in session {session_id}"
+    )
+
+    session = db.get_session(session_id)
+    if not session:
+        logger.warning(f"Session not found: {session_id}")
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Get orchestrator to access memory system
+    if session_id not in orchestrators_db:
+        from backend.engine.orchestrator import TurnOrchestrator
+        from backend.schemas import ScenarioSpec
+
+        spec = ScenarioSpec(**session["scenario_spec"])
+        temp_orchestrator = TurnOrchestrator(spec, session_id, db)
+        orchestrators_db[session_id] = temp_orchestrator
+
+    orchestrator = orchestrators_db[session_id]
+
+    # Get relationship summary from memory system
+    try:
+        relationship_summary = orchestrator.memory.get_entity_relationship_summary(
+            entity_id
+        )
+
+        return {
+            "session_id": session_id,
+            "entity_id": entity_id,
+            "relationship_summary": relationship_summary,
+        }
+    except Exception as e:
+        logger.error(f"Failed to get relationship summary for {entity_id}: {e}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Entity {entity_id} not found or has no relationships",
+        )
+
+
+@router.get("/{session_id}/graph/summary")
+async def get_graph_summary(session_id: str):
+    """
+    Get overall relationship graph statistics for a session.
+
+    Returns graph-wide statistics including:
+    - Total entities and relationships
+    - Relationship types distribution
+    - Most connected entities
+
+    Args:
+        session_id: Session identifier
+
+    Returns:
+        Dictionary with graph summary statistics
+
+    Raises:
+        HTTPException 404: Session not found
+    """
+    logger.debug(f"Retrieving graph summary for session {session_id}")
+
+    session = db.get_session(session_id)
+    if not session:
+        logger.warning(f"Session not found: {session_id}")
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Get orchestrator to access memory system
+    if session_id not in orchestrators_db:
+        from backend.engine.orchestrator import TurnOrchestrator
+        from backend.schemas import ScenarioSpec
+
+        spec = ScenarioSpec(**session["scenario_spec"])
+        temp_orchestrator = TurnOrchestrator(spec, session_id, db)
+        orchestrators_db[session_id] = temp_orchestrator
+
+    orchestrator = orchestrators_db[session_id]
+
+    # Get graph summary from memory system
+    try:
+        graph_summary = orchestrator.memory.get_graph_summary()
+
+        return {
+            "session_id": session_id,
+            "graph_summary": graph_summary,
+        }
+    except Exception as e:
+        logger.error(f"Failed to get graph summary for session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve graph summary")
+
+
+@router.delete("/{session_id}")
+async def delete_session(session_id: str):
+    """
+    Delete a session and clean up associated resources.
+
+    This endpoint:
+    1. Removes session from database
+    2. Deletes session-specific ChromaDB collection
+    3. Removes orchestrator from memory
+    4. Clears any cached data
+
+    Args:
+        session_id: Session identifier to delete
+
+    Returns:
+        Confirmation message
+
+    Raises:
+        HTTPException 404: Session not found
+    """
+    logger.info(f"Deleting session: {session_id}")
+
+    # Check if session exists
+    session = db.get_session(session_id)
+    if not session:
+        logger.warning(f"Session not found for deletion: {session_id}")
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    try:
+        # Delete from database
+        db.delete_session(session_id)
+        logger.info(f"Deleted session {session_id} from database")
+
+        # Delete ChromaDB collection if semantic search is available
+        try:
+            from backend.engine.memory_search import SemanticMemorySearch
+
+            # Create temporary semantic search instance to access collection
+            temp_search = SemanticMemorySearch(session_id)
+            if temp_search.is_available() and temp_search.vectorstore:
+                # Delete the session-specific collection
+                temp_search.vectorstore.delete_collection()
+                logger.info(f"Deleted ChromaDB collection for session {session_id}")
+        except Exception as e:
+            logger.warning(
+                f"Failed to delete ChromaDB collection for session {session_id}: {e}"
+            )
+
+        # Remove from orchestrator cache
+        if session_id in orchestrators_db:
+            del orchestrators_db[session_id]
+            logger.debug(f"Removed orchestrator for session {session_id}")
+
+        # Clear cache
+        memory_cache.clear_session(session_id)
+        logger.debug(f"Cleared cache for session {session_id}")
+
+        return {
+            "message": f"Session {session_id} deleted successfully",
+            "deleted_resources": [
+                "database",
+                "vector_collection",
+                "orchestrator",
+                "cache",
+            ],
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to delete session {session_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to delete session: {str(e)}"
+        )
+
+
+@router.get("/{session_id}/performance")
+async def get_session_performance(session_id: str):
+    """
+    Get performance metrics for a session.
+
+    Returns metrics including:
+    - Turn count and duration
+    - Tool call statistics
+    - Memory usage
+    - Response times
+
+    Args:
+        session_id: Session identifier
+
+    Returns:
+        Dictionary with performance metrics
+
+    Raises:
+        HTTPException 404: Session not found
+    """
+    logger.debug(f"Retrieving performance metrics for session {session_id}")
+
+    session = db.get_session(session_id)
+    if not session:
+        logger.warning(f"Session not found: {session_id}")
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Get orchestrator to access memory statistics
+    if session_id not in orchestrators_db:
+        from backend.engine.orchestrator import TurnOrchestrator
+        from backend.schemas import ScenarioSpec
+
+        spec = ScenarioSpec(**session["scenario_spec"])
+        temp_orchestrator = TurnOrchestrator(spec, session_id, db)
+        orchestrators_db[session_id] = temp_orchestrator
+
+    orchestrator = orchestrators_db[session_id]
+
+    # Collect performance metrics
+    memory_stats = orchestrator.memory.get_memory_statistics()
+
+    # Get semantic search stats if available
+    semantic_stats = {}
+    if (
+        hasattr(orchestrator.memory, "semantic_search")
+        and orchestrator.memory.semantic_search.is_available()
+    ):
+        semantic_stats = orchestrator.memory.semantic_search.get_stats()
+
+    return {
+        "session_id": session_id,
+        "turn_count": session.get("turn", 0),
+        "created_at": session.get("created_at"),
+        "memory_stats": memory_stats,
+        "semantic_search_stats": semantic_stats,
+        "relationship_graph_stats": orchestrator.memory.get_graph_summary(),
+    }
