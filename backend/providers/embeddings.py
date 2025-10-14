@@ -127,11 +127,10 @@ def _create_lmstudio_embeddings() -> Optional[Embeddings]:
     """
     Create LM Studio embedding provider.
 
-    LM Studio uses OpenAI-compatible API, so we can use OpenAIEmbeddings
+    Uses custom LMStudioEmbeddings wrapper for better compatibility
     """
     try:
-        from langchain_openai import OpenAIEmbeddings
-        from pydantic import SecretStr
+        from backend.providers.lmstudio_embeddings import LMStudioEmbeddings
 
         # Use embedding_api_base if set, otherwise lmstudio_api_base, then fall back to openai_api_base
         api_base = (
@@ -144,28 +143,21 @@ def _create_lmstudio_embeddings() -> Optional[Embeddings]:
         if api_base == "https://api.openai.com/v1":
             api_base = DEFAULT_LMSTUDIO_API_BASE
 
-        # LM Studio doesn't require an API key
-        api_key = settings.openai_api_key or "lm-studio"
-
-        # For LM Studio, the model name can be any string
+        # Get model name from settings
         model_name = settings.embedding_model_name
         if model_name == "text-embedding-3-small":  # OpenAI default
-            model_name = "local-embedding-model"
-            logger.info(f"Using LM Studio embedding model name: {model_name}")
+            model_name = "text-embedding-nomic-embed-text-v1.5"  # LM Studio default
+            logger.info(f"Using LM Studio default embedding model: {model_name}")
 
-        embeddings = OpenAIEmbeddings(
+        embeddings = LMStudioEmbeddings(
             model=model_name,
-            api_key=SecretStr(api_key),
             base_url=api_base,
-            chunk_size=1000,
         )
 
         logger.info(f"✓ Initialized LM Studio embeddings: {model_name} at {api_base}")
         return embeddings
-    except ImportError:
-        logger.error(
-            "langchain_openai not installed. Install with: pip install langchain-openai"
-        )
+    except ImportError as e:
+        logger.error(f"Failed to import LMStudioEmbeddings: {e}")
         return None
     except Exception as e:
         logger.error(f"Failed to create LM Studio embeddings: {e}")
