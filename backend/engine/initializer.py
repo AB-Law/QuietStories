@@ -308,6 +308,10 @@ for characters/entities in interactive stories. Write 1-2 paragraphs covering:
 - Key personality traits or motivations
 - How they fit into the world
 
+If the character has a placeholder name (like "Character 1" or "villager_1"),
+you may naturally refer to them by a more fitting name in the background if it feels appropriate.
+Keep names simple and contextually appropriate.
+
 Be specific and interesting. No meta-commentary."""
 
         entity_info = {
