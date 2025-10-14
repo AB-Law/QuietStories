@@ -127,6 +127,15 @@ TOOL USAGE GUIDELINES:
 - Use add_memory to record NPC thoughts during your thinking phase (NOT in final outcome)
 - Use search_memories to find relevant information from past events, character relationships, or world knowledge
 
+🔗 **RELATIONSHIP TRACKING PRIORITY**:
+Characters who interact should have relationship memories recorded via add_memory:
+- add_memory(entity_id="character_name", content="relationship development with other_character", visibility="private")
+- Focus on: trust changes, emotional bonds, conflicts, alliances, romantic development
+- Record memories from BOTH characters' perspectives when they interact
+- Examples:
+  * add_memory(entity_id="elena", content="Growing to trust Marcus after he saved her from the bandits", visibility="private")
+  * add_memory(entity_id="marcus", content="Feeling protective of Elena after seeing her vulnerability", visibility="private")
+
 CHARACTER NAMING GUIDELINES:
 - Avoid numbered generic names like "villager_1", "wolf_1", "character_2", "merchant_1"
 - Give characters names that feel natural and fit the story context
