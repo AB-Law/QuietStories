@@ -4,7 +4,7 @@ JSONLogic evaluator for conditions and derived values
 
 from typing import Any, Dict
 
-import jsonlogic
+import json_logic as jsonlogic
 
 
 class JSONLogicEvaluator:
@@ -17,7 +17,7 @@ class JSONLogicEvaluator:
         """Evaluate a JSONLogic expression against context"""
 
         try:
-            return self.evaluator.apply(expression, context)
+            return self.evaluator.jsonLogic(expression, context)
         except Exception as e:
             raise ValueError(f"JSONLogic evaluation failed: {e}")
 
@@ -75,7 +75,7 @@ class JSONLogicEvaluator:
 
             # Try to evaluate with a test context
             test_context = {"test": True, "value": 1}
-            self.evaluator.apply(expression, test_context)
+            self.evaluator.jsonLogic(expression, test_context)
             return True
         except Exception:
             return False
