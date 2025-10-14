@@ -1,0 +1,61 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # QuietStories application logs
+  - job_name: quietstories
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: quietstories
+          app: quietstories
+          __path__: /var/log/quietstories/*.log
+    pipeline_stages:
+      # Parse timestamp and level from Python logs
+      - regex:
+          expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \| (?P<level>\w+) \| (?P<logger>[\w.]+) \| (?P<message>.*)'
+      - timestamp:
+          source: timestamp
+          format: '2006-01-02 15:04:05'
+      - labels:
+          level: '{{ .level }}'
+          logger: '{{ .logger }}'
+
+      # Extract component from [Component] patterns
+      - regex:
+          expression: '\[(?P<component>\w+)\]'
+          source: message
+      - labels:
+          component: '{{ .component }}'
+
+      # Extract API request details
+      - regex:
+          expression: 'Request (?P<api_action>started|completed|failed): (?P<method>\w+) (?P<path>[^\s]+)'
+          source: message
+      - labels:
+          api_action: '{{ .api_action }}'
+          method: '{{ .method }}'
+          path: '{{ .path }}'
+
+      # Extract API status codes
+      - regex:
+          expression: '-> (?P<status_code>\d+)'
+          source: message
+      - labels:
+          status_code: '{{ .status_code }}'
+
+      # Extract LLM call details
+      - regex:
+          expression: 'Call (?P<llm_action>started|completed|failed): (?P<model>[^\s]+)'
+          source: message
+      - labels:
+          llm_action: '{{ .llm_action }}'
+          model: '{{ .model }}'
