@@ -101,6 +101,14 @@ class TokenEstimator:
 
         Uses rough approximation: ~4 characters per token for English text.
 
+        **Approximation Limitations:**
+        - Simple 4-char-per-token heuristic varies by tokenizer
+        - Actual tokenization depends on model (GPT-4, Llama, Mistral, etc.)
+        - May be 20-40% inaccurate for non-English text or code-heavy content
+        - For production accuracy, consider integrating tiktoken or model-specific tokenizers
+
+        This is intentionally a fast approximation for optimization decisions.
+
         Args:
             text: Input text
 

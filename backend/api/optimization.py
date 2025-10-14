@@ -19,24 +19,36 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 
+# Configuration limits with rationale
+# These values balance flexibility with preventing extreme configurations
+MIN_CONTEXT_TOKENS = 1000  # Minimum for coherent responses
+MAX_CONTEXT_TOKENS = 100000  # Maximum to prevent excessive API costs/timeouts
+MIN_TURN_HISTORY = 1  # At least one turn for context
+MAX_TURN_HISTORY = 50  # Beyond this, context becomes unwieldy
+MIN_MEMORIES_PER_ENTITY = 1  # At least one memory to be useful
+MAX_MEMORIES_PER_ENTITY = 100  # Practical limit for performance
+
 
 class OptimizationConfig(BaseModel):
     """Configuration for LLM optimization"""
 
     max_turn_history: Optional[int] = Field(
         default=None,
-        ge=1,
-        le=50,
+        ge=MIN_TURN_HISTORY,
+        le=MAX_TURN_HISTORY,
         description="Maximum turns to include in context history",
     )
     max_memories_per_entity: Optional[int] = Field(
-        default=None, ge=1, le=100, description="Maximum memories per entity in context"
+        default=None,
+        ge=MIN_MEMORIES_PER_ENTITY,
+        le=MAX_MEMORIES_PER_ENTITY,
+        description="Maximum memories per entity in context",
     )
     max_context_tokens: Optional[int] = Field(
         default=None,
-        ge=1000,
-        le=100000,
-        description="Target maximum context size in tokens",
+        ge=MIN_CONTEXT_TOKENS,
+        le=MAX_CONTEXT_TOKENS,
+        description=f"Target maximum context size in tokens ({MIN_CONTEXT_TOKENS}-{MAX_CONTEXT_TOKENS})",
     )
     enable_caching: Optional[bool] = Field(
         default=None, description="Whether to enable context caching"
@@ -227,8 +239,5 @@ async def apply_optimization_preset(preset_name: str) -> Dict[str, Any]:
         "status": "success",
         "preset": preset_name,
         "description": preset["description"],
-        "config": {
-            k: v for k, v in preset.items() if k != "description"
-        },
+        "config": {k: v for k, v in preset.items() if k != "description"},
     }
-
