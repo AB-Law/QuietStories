@@ -13,7 +13,7 @@ Key optimizations:
 
 import hashlib
 import json
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from langchain.schema import BaseMessage, HumanMessage, SystemMessage
 
@@ -284,7 +284,10 @@ class ContextOptimizer:
 
         # Apply sliding window to conversation history
         # Keep most recent messages that fit in budget
-        system_tokens = self.token_estimator.estimate_messages_tokens(system_messages)
+        system_messages_typed = cast(List[BaseMessage], system_messages)
+        system_tokens = self.token_estimator.estimate_messages_tokens(
+            system_messages_typed
+        )
         remaining_budget = self.max_context_tokens - system_tokens
 
         optimized_others: List[BaseMessage] = []

@@ -14,13 +14,13 @@ try:
     from chromadb.config import Settings
     from langchain_chroma import Chroma
     from langchain_community.vectorstores.utils import filter_complex_metadata
-    from langchain_openai import OpenAIEmbeddings
 
     CHROMA_AVAILABLE = True
 except ImportError:
     CHROMA_AVAILABLE = False
 
 from backend.config import settings
+from backend.providers.embeddings import create_embedding_provider
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -57,40 +57,21 @@ class SemanticMemorySearch:
             )
             return
 
-        # Check if OpenAI API key is available
-        if not settings.openai_api_key:
-            logger.info(
-                "OpenAI API key not configured. Semantic memory search will be disabled. "
-                "Add OPENAI_API_KEY to environment variables to enable semantic search."
-            )
-            return
-
-        # Initialize embedding model
+        # Initialize embedding model using the factory
         try:
-            from pydantic import SecretStr
+            self.embedding_model = create_embedding_provider()
 
-            if settings.openai_api_base:
-                self.embedding_model = OpenAIEmbeddings(
-                    model="text-embedding-3-small",
-                    chunk_size=1000,
-                    api_key=(
-                        SecretStr(settings.openai_api_key)
-                        if settings.openai_api_key
-                        else None
-                    ),
-                    base_url=settings.openai_api_base,
+            if self.embedding_model is None:
+                logger.info(
+                    "Embedding provider not configured or disabled. "
+                    "Semantic memory search will be disabled. "
+                    "Configure embedding_provider in settings to enable semantic search."
                 )
-            else:
-                self.embedding_model = OpenAIEmbeddings(
-                    model="text-embedding-3-small",
-                    chunk_size=1000,
-                    api_key=(
-                        SecretStr(settings.openai_api_key)
-                        if settings.openai_api_key
-                        else None
-                    ),
-                )
-            logger.info("Initialized semantic memory search with OpenAI embeddings")
+                return
+
+            logger.info(
+                "Initialized semantic memory search with configured embedding provider"
+            )
         except Exception as e:
             logger.info(
                 f"Could not initialize embedding model: {e}. Semantic search disabled."
@@ -305,12 +286,19 @@ class SemanticMemorySearch:
                 except:
                     count = 0
 
+            # Determine embedding model info
+            embedding_info = "unknown"
+            if self.embedding_model:
+                embedding_info = getattr(
+                    self.embedding_model, "model", settings.embedding_model_name
+                )
+
             return {
                 "available": True,
                 "total_memories": count,
-                "embedding_model": (
-                    "text-embedding-3-small" if self.embedding_model else None
-                ),
+                "embedding_model": embedding_info,
+                "embedding_provider": settings.embedding_provider
+                or settings.model_provider,
                 "persist_directory": self.persist_directory,
                 "collection_name": self.collection_name,
                 "session_id": self.session_id,
