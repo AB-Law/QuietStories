@@ -59,6 +59,8 @@ def setup_logging(
     log_file: Optional[str] = None,
     enable_colors: bool = True,
     include_timestamp: bool = True,
+    enable_file_logging: bool = True,
+    enable_console_logging: bool = True,
 ) -> None:
     """
     Setup logging configuration for the application
@@ -68,6 +70,8 @@ def setup_logging(
         log_file: Optional path to log file. If provided, logs will be written to file
         enable_colors: Whether to enable colored output for console
         include_timestamp: Whether to include timestamp in log messages
+        enable_file_logging: Whether to enable automatic file logging for centralized logging
+        enable_console_logging: Whether to enable console output (set False for production)
     """
     # Convert string level to logging level
     numeric_level = getattr(logging, level.upper(), logging.INFO)
@@ -80,16 +84,19 @@ def setup_logging(
         fmt = "%(levelname)-8s | %(name)s | %(message)s"
         datefmt = None
 
-    # Console handler
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(numeric_level)
+    # Console handler (optional)
+    if enable_console_logging:
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(numeric_level)
 
-    if enable_colors and sys.stdout.isatty():
-        console_formatter: logging.Formatter = ColoredFormatter(fmt, datefmt=datefmt)
-    else:
-        console_formatter = logging.Formatter(fmt, datefmt=datefmt)
+        if enable_colors and sys.stdout.isatty():
+            console_formatter: logging.Formatter = ColoredFormatter(
+                fmt, datefmt=datefmt
+            )
+        else:
+            console_formatter = logging.Formatter(fmt, datefmt=datefmt)
 
-    console_handler.setFormatter(console_formatter)
+        console_handler.setFormatter(console_formatter)
 
     # Configure root logger
     root_logger = logging.getLogger()
@@ -98,15 +105,21 @@ def setup_logging(
     # Remove existing handlers
     root_logger.handlers = []
 
-    # Add console handler
-    root_logger.addHandler(console_handler)
+    # Add console handler if enabled
+    if enable_console_logging:
+        root_logger.addHandler(console_handler)
 
-    # File handler (optional)
-    if log_file:
-        log_path = Path(log_file)
-        log_path.parent.mkdir(parents=True, exist_ok=True)
+    # Automatic file logging for centralized logging system
+    if enable_file_logging:
+        # Create logs directory if it doesn't exist
+        logs_dir = Path("logs")
+        logs_dir.mkdir(exist_ok=True)
 
-        file_handler = logging.FileHandler(log_file)
+        # Create a dated log file
+        today = datetime.now().strftime("%Y-%m-%d")
+        auto_log_file = logs_dir / f"quietstories-{today}.log"
+
+        file_handler = logging.FileHandler(auto_log_file)
         file_handler.setLevel(numeric_level)
 
         # File logs don't need colors
@@ -115,6 +128,20 @@ def setup_logging(
 
         root_logger.addHandler(file_handler)
 
+    # Custom file handler (optional)
+    if log_file:
+        log_path = Path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        custom_file_handler = logging.FileHandler(log_file)
+        custom_file_handler.setLevel(numeric_level)
+
+        # File logs don't need colors
+        custom_file_formatter = logging.Formatter(fmt, datefmt=datefmt)
+        custom_file_handler.setFormatter(custom_file_formatter)
+
+        root_logger.addHandler(custom_file_handler)
+
     # Silence noisy libraries
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
@@ -122,8 +149,10 @@ def setup_logging(
     logging.getLogger("openai").setLevel(logging.WARNING)
 
     root_logger.info(f"Logging initialized at {level} level")
+    if enable_file_logging:
+        root_logger.info(f"Automatic file logging enabled: {auto_log_file}")
     if log_file:
-        root_logger.info(f"Logging to file: {log_file}")
+        root_logger.info(f"Custom logging to file: {log_file}")
 
 
 def get_logger(name: str) -> logging.Logger:
