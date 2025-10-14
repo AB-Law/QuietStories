@@ -54,26 +54,42 @@ class SemanticMemorySearch:
 
         # Check if OpenAI API key is available
         if not settings.openai_api_key:
-            logger.warning(
-                "OpenAI API key not configured. Semantic memory search will be disabled."
+            logger.info(
+                "OpenAI API key not configured. Semantic memory search will be disabled. "
+                "Add OPENAI_API_KEY to environment variables to enable semantic search."
             )
             return
 
         # Initialize embedding model
         try:
+            from pydantic import SecretStr
+
             if settings.openai_api_base:
                 self.embedding_model = OpenAIEmbeddings(
                     model="text-embedding-3-small",
                     chunk_size=1000,
+                    api_key=(
+                        SecretStr(settings.openai_api_key)
+                        if settings.openai_api_key
+                        else None
+                    ),
                     base_url=settings.openai_api_base,
                 )
             else:
                 self.embedding_model = OpenAIEmbeddings(
-                    model="text-embedding-3-small", chunk_size=1000
+                    model="text-embedding-3-small",
+                    chunk_size=1000,
+                    api_key=(
+                        SecretStr(settings.openai_api_key)
+                        if settings.openai_api_key
+                        else None
+                    ),
                 )
             logger.info("Initialized semantic memory search with OpenAI embeddings")
         except Exception as e:
-            logger.error(f"Failed to initialize embedding model: {e}")
+            logger.info(
+                f"Could not initialize embedding model: {e}. Semantic search disabled."
+            )
             return
 
         # Initialize ChromaDB with LangChain
@@ -112,7 +128,7 @@ class SemanticMemorySearch:
             True if successfully added, False otherwise
         """
         if not self.is_available():
-            logger.warning("Semantic search not available, skipping memory indexing")
+            logger.debug("Semantic search not available, skipping memory indexing")
             return False
 
         try:
@@ -167,7 +183,7 @@ class SemanticMemorySearch:
             List of matching memories with similarity scores
         """
         if not self.is_available():
-            logger.warning("Semantic search not available, returning empty results")
+            logger.debug("Semantic search not available, returning empty results")
             return []
 
         try:
