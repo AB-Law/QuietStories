@@ -30,6 +30,7 @@ from backend.schemas import Outcome, ScenarioSpec
 from backend.schemas.outcome import RollRequest
 from backend.utils.jsonlogic import JSONLogicEvaluator
 from backend.utils.logger import get_logger
+from backend.utils.optimization import ContextOptimizer, get_optimizer
 
 logger = get_logger(__name__)
 
@@ -135,6 +136,10 @@ class TurnOrchestrator:
         self._session_ref: Optional[Dict[str, Any]] = (
             None  # Will be set to access session data
         )
+        
+        # Initialize optimization components
+        self.optimizer = get_optimizer()
+        logger.debug("[Orchestrator] Optimizer initialized")
 
         # Initialize Langgraph components
         self.checkpointer = InMemorySaver()
@@ -766,10 +771,18 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
         validated_messages = self._validate_message_sequence(messages)
         self._verbose_log(f"Validated {len(validated_messages)} messages for LLM call")
 
+        # Optimize messages to reduce token usage
+        optimized_messages = self.optimizer.optimize_messages(
+            validated_messages, preserve_system=True
+        )
+        self._verbose_log(
+            f"Optimized messages: {len(validated_messages)} -> {len(optimized_messages)}"
+        )
+
         # Call LLM with tools
         self._verbose_log("About to call LLM provider...")
         response = await self.provider.chat(
-            messages=validated_messages, tools=self.tools
+            messages=optimized_messages, tools=self.tools
         )
         self._verbose_log("LLM provider call completed")
 

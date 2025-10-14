@@ -7,6 +7,7 @@ import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.api.optimization import router as optimization_router
 from backend.api.prompts import router as prompts_router
 from backend.api.scenarios import router as scenarios_router
 from backend.api.sessions import router as sessions_router
@@ -54,6 +55,7 @@ app.include_router(scenarios_router, prefix="/scenarios", tags=["scenarios"])
 app.include_router(sessions_router, prefix="/sessions", tags=["sessions"])
 app.include_router(prompts_router, prefix="/prompts", tags=["prompts"])
 app.include_router(settings_router, prefix="/settings", tags=["settings"])
+app.include_router(optimization_router, prefix="/optimization", tags=["optimization"])
 
 
 @app.on_event("startup")

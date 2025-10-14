@@ -6,7 +6,9 @@ A dynamic Choose-Your-Own-Adventure (CYOA) engine that generates interactive sto
 
 - **Dynamic Scenario Generation**: Input any free-text description to generate a complete scenario with rules, actions, and events
 - **AI-Powered Narrator**: Uses LLMs to create engaging, context-aware story progression
-- **Multi-Provider Support**: Works with OpenAI, Ollama, and other OpenAI-compatible endpoints
+- **Multi-Provider Support**: Works with OpenAI, Ollama, LMStudio, and other OpenAI-compatible endpoints
+- **Local LLM Support**: Full support for running models locally via LMStudio or Ollama
+- **Smart Optimization**: Automatic context reduction, memory consolidation, and caching for faster performance
 - **Rule Enforcement**: Server-side validation ensures stories follow generated rules
 - **Memory System**: Public and private memory for entities with proper visibility controls
 - **Monte Carlo Balancing**: Automatic difficulty balancing through simulation
@@ -32,7 +34,9 @@ The system consists of:
 
 - Python 3.11+
 - Node.js 18+ (for frontend)
-- Ollama (optional, for local LLMs)
+- Ollama or LMStudio (optional, for local LLMs)
+
+> **NEW:** Full support for local LLMs! See [OPTIMIZATION_GUIDE.md](OPTIMIZATION_GUIDE.md) for setup instructions.
 
 ### Backend Setup
 
@@ -255,7 +259,21 @@ All these checks are automatically run before each commit via pre-commit hooks.
 | `LOG_FILE` | Log file path | - |
 | `DATABASE_URL` | Database URL | sqlite:///data/quietstories.db |
 
-### Ollama Setup
+### Local LLM Setup
+
+#### Option 1: LMStudio (Recommended for beginners)
+
+1. Download LMStudio: https://lmstudio.ai/
+2. Load a model (e.g., Mistral 7B)
+3. Start the local server
+4. Configure:
+   ```bash
+   MODEL_PROVIDER=lmstudio
+   OPENAI_API_BASE=http://localhost:5101/v1
+   MODEL_NAME=local-model
+   ```
+
+#### Option 2: Ollama
 
 1. Install Ollama: https://ollama.ai/
 2. Pull a model: `ollama pull llama2`
@@ -264,6 +282,8 @@ All these checks are automatically run before each commit via pre-commit hooks.
    MODEL_PROVIDER=ollama
    MODEL_NAME=llama2
    ```
+
+**For detailed setup and optimization:** See [OPTIMIZATION_GUIDE.md](OPTIMIZATION_GUIDE.md)
 
 ## Contributing
 

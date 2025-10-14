@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
 
     # LLM Provider Configuration
-    model_provider: Literal["openai", "ollama", "generic"] = Field(default="openai")
+    model_provider: Literal["openai", "ollama", "generic", "lmstudio"] = Field(default="openai")
     openai_api_base: str = Field(default="https://api.openai.com/v1")
     openai_api_key: str = Field(default="")
     model_name: str = Field(default="gpt-5-nano")
