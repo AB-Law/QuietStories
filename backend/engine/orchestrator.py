@@ -20,6 +20,7 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from typing_extensions import TypedDict
 
+from backend.config import settings
 from backend.db.manager import DatabaseManager
 from backend.engine.compiler import ScenarioCompiler
 from backend.engine.memory import MemoryManager, MemoryScope, MemoryVisibility
@@ -217,6 +218,8 @@ class TurnOrchestrator:
         builder.add_edge("process_tools", "agent")
         builder.add_edge("handle_errors", "agent")
         builder.add_edge("outcome", "reflection")
+
+        # FIXED: Reflection should always end - no infinite loops!
         builder.add_edge("reflection", END)
 
         # Compile with checkpointer
@@ -226,16 +229,8 @@ class TurnOrchestrator:
         """
         Perform reflection phase after narrative generation.
 
-        This node analyzes the generated outcome and prompts the LLM to:
-        - Update character memories based on what happened
-        - Record important observations and thoughts
-        - Update relationships and world state as needed
-
-        Args:
-            state: Current agent state with outcome
-
-        Returns:
-            Updated state (may include additional tool calls for memory updates)
+        This handles the entire reflection process internally, including executing
+        any tool calls for memory updates, to avoid infinite graph loops.
         """
         logger.debug("[Reflection] Starting reflection phase")
 
@@ -262,69 +257,128 @@ class TurnOrchestrator:
         reflection_prompt = self._create_reflection_prompt(state, outcome_message)
 
         # Add reflection message to conversation
-        messages.append(HumanMessage(content=reflection_prompt))
+        reflection_messages = messages + [HumanMessage(content=reflection_prompt)]
 
         # Get reflection response (may include tool calls for memory updates)
-        reflection_response = await self.provider.chat(
-            messages=messages, tools=self.tools
-        )
-
-        # Add reflection response to messages
-        if reflection_response.tool_calls:
-            # Format tool_calls for LangGraph compatibility (same as in _call_agent)
-            formatted_tool_calls = []
-            for i, tc in enumerate(reflection_response.tool_calls):
-                logger.debug(f"[Reflection] Processing tool call {i}: {tc}")
-
-                # Handle OpenAI format with "function" wrapper
-                if "function" in tc:
-                    function_info = tc.get("function", {})
-                    tool_name = function_info.get("name")
-                    raw_args = function_info.get("arguments", {})
-                    logger.debug(
-                        f"[Reflection] OpenAI format - tool: {tool_name}, args: {raw_args}"
-                    )
-                else:
-                    # Direct format
-                    tool_name = tc.get("name")
-                    raw_args = tc.get("args", {})
-                    logger.debug(
-                        f"[Reflection] Direct format - tool: {tool_name}, args: {raw_args}"
-                    )
-
-                # Parse args if they're a string
-                if isinstance(raw_args, str):
-                    try:
-                        parsed_args = json.loads(raw_args) if raw_args else {}
-                    except json.JSONDecodeError:
-                        logger.warning(
-                            f"[Reflection] Failed to parse args as JSON: {raw_args}"
-                        )
-                        parsed_args = {}
-                else:
-                    parsed_args = raw_args
-
-                formatted_call = {
-                    "name": tool_name,
-                    "args": parsed_args,
-                    "id": tc.get("id"),
-                    "type": "tool_call",  # LangGraph expects "tool_call", not "function"
-                }
-
-                logger.debug(f"[Reflection] Formatted tool call {i}: {formatted_call}")
-                formatted_tool_calls.append(formatted_call)
-
-            # For reflection with tool calls, minimize content to avoid interfering with outcome selection
-            assistant_message = AIMessage(
-                content="[Memory updates completed]",  # Minimal marker content
-                tool_calls=formatted_tool_calls,
+        try:
+            reflection_response = await self.provider.chat(
+                messages=reflection_messages, tools=self.tools
             )
-        else:
-            # For reflection without tool calls, use minimal content
-            assistant_message = AIMessage(content="[No memory updates needed]")
 
-        logger.debug("[Reflection] Reflection phase completed")
-        return {"messages": messages + [assistant_message]}
+            # If reflection response has tool calls, execute them immediately
+            if reflection_response.tool_calls:
+                logger.debug(
+                    f"[Reflection] Executing {len(reflection_response.tool_calls)} tool calls"
+                )
+                logger.debug(
+                    f"[Reflection] Raw tool calls: {reflection_response.tool_calls}"
+                )
+
+                # Convert ProviderResponse to AIMessage with tool calls
+                formatted_tool_calls = []
+                for i, tc in enumerate(reflection_response.tool_calls):
+                    logger.debug(f"[Reflection] Processing tool call {i}: {tc}")
+
+                    # Handle different tool call formats
+                    if isinstance(tc, dict):
+                        # Handle OpenAI format with "function" wrapper
+                        if "function" in tc:
+                            function_info = tc.get("function", {})
+                            tool_name = function_info.get("name")
+                            raw_args = function_info.get("arguments", {})
+                        else:
+                            # Direct format
+                            tool_name = tc.get("name")
+                            raw_args = tc.get("args", {})
+
+                        tool_id = tc.get("id", f"reflection_tool_{i}")
+
+                        # Parse args if they're a string
+                        if isinstance(raw_args, str):
+                            try:
+                                parsed_args = json.loads(raw_args) if raw_args else {}
+                            except json.JSONDecodeError:
+                                logger.warning(
+                                    f"[Reflection] Failed to parse args as JSON: {raw_args}"
+                                )
+                                parsed_args = {}
+                        else:
+                            parsed_args = raw_args
+                    else:
+                        logger.warning(
+                            f"[Reflection] Unexpected tool call format: {type(tc)}"
+                        )
+                        continue
+
+                    if not tool_name:
+                        logger.warning(
+                            f"[Reflection] Tool call {i} missing name, skipping"
+                        )
+                        continue
+
+                    formatted_call = {
+                        "name": tool_name,
+                        "args": parsed_args,
+                        "id": tool_id,
+                        "type": "tool_call",
+                    }
+                    formatted_tool_calls.append(formatted_call)
+                    logger.debug(
+                        f"[Reflection] Formatted tool call {i}: {formatted_call}"
+                    )
+
+                if not formatted_tool_calls:
+                    logger.warning(
+                        "[Reflection] No valid tool calls found after formatting"
+                    )
+                    ai_message = AIMessage(
+                        content=reflection_response.content or "Reflection completed"
+                    )
+                    reflection_messages.append(ai_message)
+                else:
+                    ai_message = AIMessage(
+                        content=reflection_response.content or "",
+                        tool_calls=formatted_tool_calls,
+                    )
+                    reflection_messages.append(ai_message)
+
+                # Execute tool calls using ToolNode
+                from langgraph.prebuilt import ToolNode
+
+                tool_node = ToolNode(self.tools)
+
+                # Create temporary state for tool execution
+                tool_state = {"messages": reflection_messages}
+                tool_result = await tool_node.ainvoke(tool_state)
+
+                # Add tool results to messages
+                if isinstance(tool_result, dict) and "messages" in tool_result:
+                    reflection_messages.extend(tool_result["messages"])
+
+                # Get final reflection summary
+                final_prompt = (
+                    "Memory updates completed. Provide a brief status summary."
+                )
+                reflection_messages.append(HumanMessage(content=final_prompt))
+
+                final_response = await self.provider.chat(
+                    messages=reflection_messages, tools=[]
+                )
+                final_ai_message = AIMessage(content=final_response.content or "")
+                reflection_messages.append(final_ai_message)
+
+            else:
+                # No tool calls, just add the reflection response as AIMessage
+                ai_message = AIMessage(content=reflection_response.content or "")
+                reflection_messages.append(ai_message)
+
+        except Exception as e:
+            logger.error(f"[Reflection] Error during reflection: {e}")
+            # Add error message
+            error_response = AIMessage(content=f"Reflection error: {str(e)}")
+            reflection_messages.append(error_response)
+
+        return {"messages": reflection_messages}
 
     def _create_reflection_prompt(
         self, state: AgentState, outcome_message: BaseMessage
@@ -694,6 +748,7 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
             Updated state with new message
         """
         logger.debug("[Agent] Calling LLM for decision making")
+        self._verbose_log("Entering _call_agent")
 
         # Update game state in messages if it has changed
         current_game_state = state["game_state"]
@@ -701,12 +756,22 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
 
         # Build fresh context with current state
         fresh_context = self._build_context_from_state(state)
+        self._verbose_log(f"Built fresh context with {len(fresh_context)} keys")
 
         # Get the latest messages from state
         messages = state["messages"]
+        self._log_message_sequence(messages, "Agent call - input messages")
+
+        # Validate message sequence before calling LLM
+        validated_messages = self._validate_message_sequence(messages)
+        self._verbose_log(f"Validated {len(validated_messages)} messages for LLM call")
 
         # Call LLM with tools
-        response = await self.provider.chat(messages=messages, tools=self.tools)
+        self._verbose_log("About to call LLM provider...")
+        response = await self.provider.chat(
+            messages=validated_messages, tools=self.tools
+        )
+        self._verbose_log("LLM provider call completed")
 
         logger.debug(f"[Agent] LLM response content: {response.content}")
         logger.debug(f"[Agent] LLM response tool_calls: {response.tool_calls}")
@@ -761,49 +826,197 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
             assistant_message = AIMessage(
                 content=response.content or "", tool_calls=formatted_tool_calls
             )
+            self._verbose_log(
+                f"Created AIMessage with {len(formatted_tool_calls)} tool calls"
+            )
         else:
             assistant_message = AIMessage(content=response.content or "")
+            self._verbose_log("Created AIMessage with content only (no tool calls)")
 
         # Update state with fresh context
-        return {
+        result = {
             "messages": [assistant_message],
             "context": fresh_context,
             "game_state": self.spec.state,  # Keep state synchronized
             "entities": self.spec.entities,
         }
 
+        self._verbose_log("Exiting _call_agent successfully")
+        return result
+
+    def _validate_message_sequence(
+        self, messages: List[BaseMessage]
+    ) -> List[BaseMessage]:
+        """
+        Validate and fix message sequence to ensure proper tool call/response pairing.
+        Only cleans up orphaned tool messages - does NOT create dummy responses for pending calls.
+
+        Args:
+            messages: List of messages to validate
+
+        Returns:
+            Validated message list with orphaned tool messages removed
+        """
+        if not messages:
+            return messages
+
+        validated: List[BaseMessage] = []
+        active_tool_calls = set()  # Track currently active tool call IDs
+
+        for i, msg in enumerate(messages):
+            if (
+                isinstance(msg, AIMessage)
+                and hasattr(msg, "tool_calls")
+                and msg.tool_calls
+            ):
+                # AI message with tool calls - add to active calls
+                validated.append(msg)
+                new_tool_calls = [tc["id"] for tc in msg.tool_calls]
+                active_tool_calls.update(new_tool_calls)
+                self._verbose_log(
+                    f"Message validation: Added AI message with tool calls: {new_tool_calls}"
+                )
+
+            elif isinstance(msg, ToolMessage):
+                # Tool response message - only keep if it matches an active call
+                if msg.tool_call_id in active_tool_calls:
+                    validated.append(msg)
+                    active_tool_calls.remove(msg.tool_call_id)
+                    self._verbose_log(
+                        f"Message validation: Matched tool response: {msg.tool_call_id}"
+                    )
+                else:
+                    # Orphaned tool message - skip it
+                    logger.warning(
+                        f"[Agent] Skipping orphaned tool message: {msg.tool_call_id}"
+                    )
+
+            else:
+                # Regular message (Human, AI without tools, etc.)
+                validated.append(msg)
+                self._verbose_log(
+                    f"Message validation: Added regular message: {type(msg).__name__}"
+                )
+
+        # Log any remaining pending tool calls (this is normal - they'll be executed next)
+        if active_tool_calls:
+            self._verbose_log(
+                f"Message validation: Remaining active tool calls: {list(active_tool_calls)}"
+            )
+
+        return validated
+
+    def _log_message_sequence(self, messages: List[BaseMessage], context: str = ""):
+        """
+        Log detailed information about message sequences for debugging.
+
+        Args:
+            messages: List of messages to log
+            context: Context description for the log
+        """
+        if not settings.log_message_sequences and not settings.verbose_orchestrator:
+            return
+
+        logger.info(
+            f"[MessageLog] {context} - Message sequence ({len(messages)} messages):"
+        )
+
+        for i, msg in enumerate(messages):
+            msg_type = type(msg).__name__
+            content_preview = (
+                getattr(msg, "content", "")[:100] if hasattr(msg, "content") else ""
+            )
+
+            if (
+                isinstance(msg, AIMessage)
+                and hasattr(msg, "tool_calls")
+                and msg.tool_calls
+            ):
+                tool_call_ids = [tc.get("id", "no-id") for tc in msg.tool_calls]
+                logger.info(
+                    f"[MessageLog]   {i}: {msg_type} - tool_calls: {tool_call_ids}"
+                )
+                for j, tc in enumerate(msg.tool_calls):
+                    logger.info(
+                        f"[MessageLog]     Tool {j}: {tc.get('name', 'unknown')} (id: {tc.get('id', 'no-id')})"
+                    )
+            elif isinstance(msg, ToolMessage):
+                tool_call_id = getattr(msg, "tool_call_id", "no-id")
+                name = getattr(msg, "name", "unknown")
+                logger.info(
+                    f"[MessageLog]   {i}: {msg_type} - tool_call_id: {tool_call_id}, name: {name}"
+                )
+            else:
+                logger.info(
+                    f"[MessageLog]   {i}: {msg_type} - content: {content_preview}{'...' if len(content_preview) >= 100 else ''}"
+                )
+
+    def _verbose_log(self, message: str):
+        """Log verbose orchestrator information if enabled."""
+        if settings.verbose_orchestrator:
+            logger.info(f"[Verbose] {message}")
+
     async def _call_tools_with_logging(self, state: AgentState) -> Dict[str, Any]:
         """
-        Execute tool calls with detailed logging to debug the error.
+        Execute tool calls with detailed logging and proper error handling.
         """
         try:
             logger.info("[Tools] Starting tool execution")
+            self._verbose_log("Entering _call_tools_with_logging")
+
             messages = state["messages"]
             last_message = messages[-1]
+
+            self._log_message_sequence(
+                messages, "Tool execution - current message sequence"
+            )
+            self._verbose_log(f"Last message type: {type(last_message).__name__}")
 
             logger.debug(f"[Tools] Last message type: {type(last_message).__name__}")
             logger.debug(
                 f"[Tools] Has tool_calls attribute: {hasattr(last_message, 'tool_calls')}"
             )
 
-            if hasattr(last_message, "tool_calls"):
-                logger.debug(f"[Tools] Tool calls: {last_message.tool_calls}")
+            # Extract tool call IDs for proper error handling
+            tool_call_ids = []
+            if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+                tool_call_ids = [tc["id"] for tc in last_message.tool_calls]
+                logger.debug(
+                    f"[Tools] Tool calls: {len(tool_call_ids)} calls with IDs: {tool_call_ids}"
+                )
+                self._verbose_log(
+                    f"About to execute {len(tool_call_ids)} tools: {tool_call_ids}"
+                )
 
             # Use standard ToolNode but with error wrapping
             tool_node = ToolNode(self.tools)
             logger.debug(f"[Tools] Created ToolNode with {len(self.tools)} tools")
+            self._verbose_log(
+                f"Created ToolNode with tools: {[t.name for t in self.tools]}"
+            )
 
             # Call the standard ToolNode
             logger.debug("[Tools] Invoking ToolNode...")
+            self._verbose_log("About to call ToolNode.ainvoke...")
             result = await tool_node.ainvoke(state)
             logger.info(f"[Tools] ToolNode completed successfully")
-            logger.debug(f"[Tools] Result: {result}")
+            logger.debug(
+                f"[Tools] Result keys: {list(result.keys()) if isinstance(result, dict) else 'not dict'}"
+            )
+            self._verbose_log("ToolNode execution completed successfully")
+
+            # Log the result messages
+            if isinstance(result, dict) and "messages" in result:
+                self._log_message_sequence(
+                    result["messages"], "Tool execution - result messages"
+                )
 
             return result
 
         except Exception as e:
             logger.error(f"[Tools] Tool execution failed: {e}")
             logger.error(f"[Tools] Exception type: {type(e).__name__}")
+            self._verbose_log(f"Tool execution failed: {type(e).__name__}: {e}")
 
             import traceback
 
@@ -811,21 +1024,55 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
             for line in traceback.format_exc().splitlines():
                 logger.error(f"[Tools] {line}")
 
-            # Return error as tool message
+            # Create error responses for all pending tool calls to maintain message sequence
             from langchain_core.messages import ToolMessage
 
-            error_message = ToolMessage(
-                content=f"Tool execution error: {str(e)}",
-                tool_call_id="error",
-                name="error",
-            )
+            error_messages: List[BaseMessage] = []
+            messages = state["messages"]
+            last_ai_message: Optional[BaseMessage] = messages[-1] if messages else None
 
-            return {
-                "messages": [error_message],
+            self._verbose_log(f"Creating error responses for tool failure")
+
+            if (
+                last_ai_message
+                and hasattr(last_ai_message, "tool_calls")
+                and last_ai_message.tool_calls
+            ):
+                # Create error response for each tool call
+                self._verbose_log(
+                    f"Creating error responses for {len(last_ai_message.tool_calls)} tool calls"
+                )
+                for tool_call in last_ai_message.tool_calls:
+                    error_message = ToolMessage(
+                        content=f"Tool execution error: {str(e)}",
+                        tool_call_id=tool_call["id"],
+                        name=tool_call.get("function", {}).get("name", "unknown"),
+                    )
+                    error_messages.append(error_message)
+                    self._verbose_log(
+                        f"Created error response for tool call {tool_call['id']}"
+                    )
+            else:
+                # Fallback error message
+                self._verbose_log("Creating fallback error message")
+                error_message = ToolMessage(
+                    content=f"Tool execution error: {str(e)}",
+                    tool_call_id="error_fallback",
+                    name="error",
+                )
+                error_messages.append(error_message)
+
+            result = {
+                "messages": error_messages,
                 "context": state.get("context", {}),
                 "game_state": state.get("game_state", {}),
                 "entities": state.get("entities", []),
             }
+
+            self._log_message_sequence(
+                error_messages, "Tool execution error - response messages"
+            )
+            return result
 
     def _should_continue(self, state: AgentState) -> str:
         """
@@ -840,27 +1087,74 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
         messages = state["messages"]
         last_message = messages[-1]
 
+        self._verbose_log("Entering _should_continue routing logic")
+
         logger.debug(f"[Router] Examining last message: {type(last_message).__name__}")
         logger.debug(
             f"[Router] Message content preview: {getattr(last_message, 'content', '')[:100]}..."
         )
 
-        # If the LLM made tool calls, execute tools
+        # Count tool calls in this current turn only (after the last SystemMessage)
+        # Find the last SystemMessage to identify the start of current turn
+        last_system_index = -1
+        for i, msg in enumerate(messages):
+            if isinstance(msg, SystemMessage):
+                last_system_index = i
+
+        # Only count tool calls from current turn (after last SystemMessage)
+        current_turn_messages = (
+            messages[last_system_index:] if last_system_index >= 0 else messages
+        )
+        tool_call_count = sum(
+            1
+            for msg in current_turn_messages
+            if hasattr(msg, "tool_calls") and msg.tool_calls
+        )
+        tool_result_count = sum(
+            1 for msg in current_turn_messages if isinstance(msg, ToolMessage)
+        )
+
+        logger.debug(
+            f"[Router] Current turn tool calls: {tool_call_count}, Tool results: {tool_result_count} (from {len(current_turn_messages)} current turn messages)"
+        )
+        self._verbose_log(
+            f"Routing decision: current_turn_tool_calls={tool_call_count}, tool_results={tool_result_count}"
+        )
+
+        # Hard limit: if we've made too many tool calls in current turn, force outcome
+        MAX_TOOL_CALLS = 10
+        if tool_call_count >= MAX_TOOL_CALLS:
+            logger.info(
+                f"[Router] Hit max tool calls limit ({MAX_TOOL_CALLS}) for current turn, forcing outcome"
+            )
+            self._verbose_log(
+                f"Routing to 'outcome' - hit max tool calls limit: {tool_call_count}"
+            )
+            return "outcome"
+
+        # If the LLM made tool calls, execute tools (unless we're over limit)
         if hasattr(last_message, "tool_calls") and last_message.tool_calls:
             tool_names = [tc.get("name", "unknown") for tc in last_message.tool_calls]
             logger.info(f"[Router] Routing to tools: {tool_names}")
             logger.debug(f"[Router] Tool calls detail: {last_message.tool_calls}")
+            self._verbose_log(f"Routing to 'tools' - found tool calls: {tool_names}")
             return "tools"
 
         # Enhanced routing logic based on context and tool results
         tool_results_count = len(state.get("tool_results", []))
         conversation_summary = state.get("conversation_summary", {})
+        self._verbose_log(f"Routing analysis: tool_results_count={tool_results_count}")
 
         # Check if we've used too many tools
-        max_rounds = 5
+        max_rounds = (
+            8  # Increased from 5 to allow more tool usage before forcing outcome
+        )
         if tool_results_count >= max_rounds:
             logger.debug(
                 f"[Router] Max tool rounds reached ({max_rounds}), routing to outcome"
+            )
+            self._verbose_log(
+                f"Routing to 'outcome' - max tool rounds: {tool_results_count}"
             )
             return "outcome"
 
@@ -868,11 +1162,17 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
         if conversation_summary:
             tools_used = conversation_summary.get("tools_used", [])
             message_count = conversation_summary.get("total_messages", 0)
+            self._verbose_log(
+                f"Conversation analysis: tools_used={len(tools_used)}, messages={message_count}"
+            )
 
             # If many tools used but no recent progress, finish
-            if len(tools_used) >= 3 and message_count > 10:
+            if len(tools_used) >= 5 and message_count > 15:  # More lenient thresholds
                 logger.debug(
                     "[Router] Detected extensive tool usage, finalizing outcome"
+                )
+                self._verbose_log(
+                    "Routing to 'outcome' - extensive tool usage detected"
                 )
                 return "outcome"
 
@@ -890,25 +1190,32 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
         ]
         if any(keyword in content.lower() for keyword in finish_keywords):
             logger.debug("[Router] Detected conclusion keywords, routing to outcome")
+            self._verbose_log("Routing to 'outcome' - detected conclusion keywords")
             return "outcome"
 
         # Keywords indicating more analysis needed
         analysis_keywords = ["need to", "should check", "let me", "first", "analyze"]
         if any(keyword in content.lower() for keyword in analysis_keywords):
             logger.debug("[Router] Detected analysis needs, allowing more tool usage")
+            self._verbose_log("Analysis keywords detected - continuing workflow")
             # Don't force outcome yet, let agent decide if it wants tools
 
         # Check game state complexity for routing decisions
         game_state = state.get("game_state", {})
         entities = state.get("entities", [])
+        self._verbose_log(
+            f"Game state complexity check: entities={len(entities)}, state_size={len(str(game_state))}"
+        )
 
         # If game state is simple and few entities, lean toward completion
         if len(entities) <= 2 and len(str(game_state)) < 500:
             logger.debug("[Router] Simple game state detected, routing to outcome")
+            self._verbose_log("Routing to 'outcome' - simple game state")
             return "outcome"
 
         # Default to outcome for final structured response
         logger.debug("[Router] Default routing to outcome")
+        self._verbose_log("Routing to 'outcome' - default decision")
         return "outcome"
 
     async def _generate_outcome(self, state: AgentState) -> Dict[str, Any]:
@@ -931,10 +1238,13 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
             )
         )
 
+        # Validate message sequence before final call
+        validated_messages = self._validate_message_sequence(messages)
+
         # Get structured response
         logger.debug("[Outcome] Requesting structured JSON response from LLM...")
         final_response = await self.provider.chat(
-            messages=messages, json_schema=self._get_outcome_schema()
+            messages=validated_messages, json_schema=self._get_outcome_schema()
         )
 
         logger.debug(
@@ -1009,9 +1319,11 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
         logger.info(
             f"[Orchestrator] Processing turn {self.memory.get_turn_count() + 1} with Langgraph StateGraph"
         )
+        self._verbose_log(f"Starting process_turn for session {self.session_id}")
 
         # Build context for the LLM
         context = self._build_context()
+        self._verbose_log(f"Built context with {len(context)} keys")
 
         # Initialize agent state
         initial_state: AgentState = {
@@ -1032,18 +1344,32 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
             "error_context": None,
         }
 
-        # Configure graph execution with thread ID
-        config = {"configurable": {"thread_id": self.session_id}}
+        self._log_message_sequence(
+            initial_state["messages"], "Initial agent state messages"
+        )
+
+        # Configure graph execution with thread ID and recursion limit
+        config = {
+            "configurable": {"thread_id": self.session_id},
+            "recursion_limit": settings.orchestrator_recursion_limit,
+        }
 
         logger.info("[Orchestrator] 🎯 Starting Langgraph agent execution")
         logger.info(
             f"[Orchestrator] 🔨 Available tools: {[t.name for t in self.tools]}"
         )
+        self._verbose_log(f"Graph execution config: {config}")
 
         try:
             # Execute the graph with detailed logging
             logger.debug("[Orchestrator] Starting graph execution...")
+            self._verbose_log("About to call graph.ainvoke...")
             final_state = await self.graph.ainvoke(initial_state, config)
+            self._verbose_log("Graph execution completed successfully")
+
+            self._log_message_sequence(
+                final_state["messages"], "Final state messages after graph execution"
+            )
 
             # Extract the final response for outcome parsing
             messages = final_state["messages"]
@@ -1106,6 +1432,9 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
             logger.error(f"[Orchestrator] Langgraph execution failed: {e}")
             logger.error(f"[Orchestrator] Exception type: {type(e).__name__}")
             logger.error(f"[Orchestrator] Exception args: {e.args}")
+            self._verbose_log(
+                f"Graph execution failed with exception: {type(e).__name__}: {e}"
+            )
 
             # Log the full traceback to understand where the error originates
             import traceback
@@ -1113,6 +1442,22 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
             logger.error(f"[Orchestrator] Full traceback:")
             for line in traceback.format_exc().splitlines():
                 logger.error(f"[Orchestrator] {line}")
+
+            # If verbose logging is enabled, also log any partial state we might have
+            if settings.verbose_orchestrator:
+                try:
+                    # Try to access any partial state that might exist
+                    if "final_state" in locals():
+                        self._verbose_log(
+                            f"Partial final_state available with keys: {list(final_state.keys()) if isinstance(final_state, dict) else 'not dict'}"
+                        )
+                        if isinstance(final_state, dict) and "messages" in final_state:
+                            self._log_message_sequence(
+                                final_state["messages"],
+                                "Partial final state messages before error",
+                            )
+                except Exception as log_error:
+                    self._verbose_log(f"Failed to log partial state: {log_error}")
 
             # Fallback to minimal outcome
             outcome = Outcome(
@@ -1893,7 +2238,7 @@ Summary:"""
         Check if action preconditions are met against current state.
 
         Args:
-            preconditions: JSONLogic expression for preconditions
+            preconditions: JSONLogic expression or simple key-value conditions
             state: Current game state
 
         Returns:
@@ -1905,11 +2250,69 @@ Summary:"""
 
         try:
             evaluator = JSONLogicEvaluator()
-            return evaluator.evaluate_condition(preconditions, state)
+
+            # Check if this is already a JSONLogic expression (has operators like ==, <, >, etc.)
+            if self._is_jsonlogic_expression(preconditions):
+                return evaluator.evaluate_condition(preconditions, state)
+            else:
+                # Convert simple key-value preconditions to JSONLogic format
+                jsonlogic_conditions = []
+                for key, expected_value in preconditions.items():
+                    # Remove 'state.' prefix if present since state IS the state object
+                    var_path = (
+                        key.replace("state.", "") if key.startswith("state.") else key
+                    )
+                    condition = {"==": [{"var": var_path}, expected_value]}
+                    jsonlogic_conditions.append(condition)
+
+                # If multiple conditions, combine with AND
+                if len(jsonlogic_conditions) == 1:
+                    final_condition = jsonlogic_conditions[0]
+                else:
+                    final_condition = {"and": jsonlogic_conditions}
+
+                return evaluator.evaluate_condition(final_condition, state)
+
         except Exception as e:
             logger.warning(f"Precondition evaluation failed for {preconditions}: {e}")
             # On evaluation error, default to available to avoid blocking gameplay
             return True
+
+    def _is_jsonlogic_expression(self, expr: Dict[str, Any]) -> bool:
+        """
+        Check if a dictionary is already a JSONLogic expression.
+
+        Args:
+            expr: Dictionary to check
+
+        Returns:
+            True if it's a JSONLogic expression, False if it's simple key-value pairs
+        """
+        jsonlogic_operators = {
+            "==",
+            "!=",
+            "<",
+            ">",
+            "<=",
+            ">=",
+            "and",
+            "or",
+            "not",
+            "in",
+            "cat",
+            "+",
+            "-",
+            "*",
+            "/",
+            "%",
+            "if",
+            "var",
+            "missing",
+            "merge",
+        }
+
+        # If any key is a JSONLogic operator, treat as JSONLogic expression
+        return any(key in jsonlogic_operators for key in expr.keys())
 
     def _resolve_roll_request(self, roll_request: RollRequest) -> Dict[str, Any]:
         """
