@@ -19,7 +19,7 @@ langchain-chroma
 
 # JSON processing
 jsonschema
-jsonlogic-py
+json-logic-qubit
 
 # Database
 sqlalchemy
