@@ -10,6 +10,9 @@ from langchain.tools import BaseTool
 from backend.schemas import Action, ScenarioSpec
 from backend.schemas.outcome import StateChange
 from backend.utils.jsonlogic import JSONLogicEvaluator
+from backend.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class ScenarioCompiler:
@@ -172,7 +175,11 @@ class ScenarioCompiler:
             )
 
             def _run(
-                self, id: str, type: str, name: str, background: Optional[str] = None
+                self,
+                id: str,
+                entity_type: str,
+                name: str,
+                background: Optional[str] = None,
             ) -> str:
                 """Create a new character"""
                 try:
@@ -186,28 +193,42 @@ class ScenarioCompiler:
                             return f"Error: Character with id '{id}' already exists. Use their existing id instead of creating a duplicate."
 
                     # Build entity data
-                    entity_data = {"id": id, "type": type, "name": name}
+                    entity_data = {"id": id, "type": entity_type, "name": name}
                     if background:
                         entity_data["background"] = background
 
                     # Add to entities list
                     compiler.spec.entities.append(entity_data)
+                    logger.info(
+                        f"[CharacterCreation] Added new character '{name}' (id: {id}) to spec.entities. Total entities: {len(compiler.spec.entities)}"
+                    )
 
                     # Also add to state.entities if it exists
                     state_entities = compiler._get_value_at_path("entities")
                     if isinstance(state_entities, list):
                         state_entities.append(entity_data)
                         compiler._set_value_at_path("entities", state_entities)
+                        logger.info(
+                            f"[CharacterCreation] Also added '{name}' to state.entities. Total state entities: {len(state_entities)}"
+                        )
+                    else:
+                        logger.warning(
+                            f"[CharacterCreation] state.entities is not a list, cannot add {name} there. Type: {type(state_entities)}"
+                        )
 
-                    return f"Character created: {name} ({id}) - {type}"
+                    return f"Character created: {name} ({id}) - {entity_type}"
                 except Exception as e:
                     return f"Error creating character: {e}"
 
             async def _arun(
-                self, id: str, type: str, name: str, background: Optional[str] = None
+                self,
+                id: str,
+                entity_type: str,
+                name: str,
+                background: Optional[str] = None,
             ) -> str:
                 """Async version of _run"""
-                return self._run(id, type, name, background)
+                return self._run(id, entity_type, name, background)
 
         tool = CreateCharacterTool()
         tool._compiler = self  # type: ignore

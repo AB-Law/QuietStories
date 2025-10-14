@@ -189,6 +189,10 @@ CRITICAL RULES:
 - "narrative" is REQUIRED and must be a string
 - "state_changes" is REQUIRED (use empty array [] if no changes)
 - "visible_dialogue", "roll_requests", "hidden_memory_updates", "suggested_actions" are OPTIONAL
+- OUTPUT MUST BE VALID JSON ONLY - no prefixes, suffixes, or markdown formatting
+- Do NOT add any text before or after the JSON
+- Do NOT use markers like [OUTCOME_MARKER] or similar prefixes
+- Start directly with { and end directly with }
 - For roll_requests:
   * "kind" must be a string (e.g., "search", "persuasion", "combat", "athletics")
   * "difficulty" must be an INTEGER between 5-20 (5=trivial, 10=easy, 15=hard, 20=very hard)
