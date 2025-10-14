@@ -6,6 +6,10 @@ from collections import defaultdict
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from backend.engine.memory_search import SemanticMemorySearch
+from backend.engine.relationship_graph import (
+    RelationshipGraph,
+    extract_relationship_from_content,
+)
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -58,6 +62,9 @@ class MemoryManager:
         # Initialize semantic search
         self.semantic_search = SemanticMemorySearch(session_id)
 
+        # Initialize relationship graph
+        self.relationship_graph = RelationshipGraph()
+
     def get_private_memory(self, entity_id: str) -> List[Dict[str, Any]]:
         """Get private memory for an entity (legacy compatibility)"""
         return self.private_memory.get(entity_id, [])
@@ -86,6 +93,22 @@ class MemoryManager:
         }
 
         self.scoped_memory[entity_id][scope][visibility].append(memory_entry)
+
+        # Auto-extract relationships if scope is "relationship"
+        if scope == "relationship" and related_entities:
+            # Extract relationship data for graph
+            relationship_data = extract_relationship_from_content(
+                content, entity_id, related_entities
+            )
+            if relationship_data:
+                # Add to relationship graph
+                self.relationship_graph.add_relationship(
+                    from_entity=relationship_data["from_entity"],
+                    to_entity=relationship_data["to_entity"],
+                    relationship_type=relationship_data["relationship_type"],
+                    sentiment=relationship_data["sentiment"],
+                    strength=relationship_data["strength"],
+                )
 
         # Add to semantic search index
         memory_id = f"{entity_id}_{scope}_{self.turn_count}_{len(self.scoped_memory[entity_id][scope][visibility])}"
@@ -223,6 +246,29 @@ class MemoryManager:
                     )
 
         return relationships
+
+    def get_entity_relationship_summary(self, entity_id: str) -> Dict[str, Any]:
+        """Get relationship summary for an entity from the relationship graph"""
+        return self.relationship_graph.get_relationship_summary(entity_id)
+
+    def get_relationships(
+        self,
+        entity_id: Optional[str] = None,
+        relationship_type: Optional[str] = None,
+        min_strength: float = 0.0,
+        limit: int = 10,
+    ) -> List[Any]:
+        """Query relationships from the relationship graph"""
+        return self.relationship_graph.get_relationships(
+            entity_id=entity_id,
+            relationship_type=relationship_type,
+            min_strength=min_strength,
+            limit=limit,
+        )
+
+    def get_graph_summary(self) -> Dict[str, Any]:
+        """Get overall relationship graph statistics"""
+        return self.relationship_graph.get_graph_summary()
 
     def _analyze_relationship_sentiment(self, content: str) -> float:
         """Analyze sentiment of relationship memory content"""
