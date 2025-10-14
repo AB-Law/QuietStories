@@ -301,18 +301,39 @@ Generate a compelling 2-4 paragraph world background:"""
         Returns:
             A 1-2 paragraph background for the entity
         """
-        system_prompt = """You are a character background writer. Create concise, vivid backgrounds
-for characters/entities in interactive stories. Write 1-2 paragraphs covering:
-- Who they are
-- Their role/position
-- Key personality traits or motivations
-- How they fit into the world
+        system_prompt = """You are an expert entity background writer for interactive stories. Create rich, deeply textured backgrounds that bring entities to life. Aim for 2-4 well-developed paragraphs (roughly 200-500 words) covering:
 
-If the character has a placeholder name (like "Character 1" or "villager_1"),
-you may naturally refer to them by a more fitting name in the background if it feels appropriate.
-Keep names simple and contextually appropriate.
+For CHARACTERS/NPCs:
+- Physical appearance and mannerisms
+- Detailed personal history and origins
+- Role/position and how they achieved it
+- Complex personality traits, quirks, and motivations
+- Relationships with other characters or groups
+- Skills, abilities, and areas of expertise
+- How they fit into and influence the world
+- Internal conflicts or goals they pursue
+- Sensory details (how they sound, smell, move)
+- A short "story hook" (1-2 sentences) that can be used as a prompt to start a scene involving this character
 
-Be specific and interesting. No meta-commentary."""
+For CREATURES:
+- Vivid physical description and unique characteristics
+- Origin story or how they came to be
+- Detailed behavior patterns and intelligence level
+- Abilities, powers, and how they use them
+- Role in the ecosystem and interactions with other beings
+- Territory, habitat, and lifestyle
+- Relationship with civilization (feared, revered, etc.)
+
+For FACTIONS/ORGANIZATIONS:
+- History and founding circumstances
+- Detailed goals, ideology, and methods
+- Organizational structure and key figures
+- Influence, territory, and resources
+- Relationships and conflicts with other groups
+- Notable achievements or failures
+- Current challenges and future ambitions
+
+Write in an engaging, immersive style that feels like it's from a fantasy novel. Use concrete sensory details, anecdotes, and at least one short scene hook or conflict seed suitable for an interactive prompt. Include specific details that make the entity memorable and unique. Avoid generic descriptions."""
 
         entity_info = {
             "id": entity.get("id", "unknown"),
@@ -320,25 +341,38 @@ Be specific and interesting. No meta-commentary."""
             "name": entity.get("name", entity.get("id", "Unknown")),
         }
 
-        user_prompt = f"""Create a background for this entity:
+        user_prompt = f"""Create a detailed background for this entity:
 
-ID: {entity_info['id']}
-Type: {entity_info['type']}
-Name: {entity_info['name']}
+Entity Information:
+- ID: {entity_info['id']}
+- Type: {entity_info['type']}
+- Name: {entity_info['name']}
 
 World Context:
 {world_background[:500]}...
 
-Scenario: {spec.name}
+Scenario Setting: {spec.name}
 
-Generate a compelling 1-2 paragraph background:"""
+Requirements:
+    - Write 2-4 well-developed paragraphs (aim for 200-500 words)
+    - Include sensory details (sight, sound, smell, movement) and at least one short "story hook" (1-2 sentences) that can start a scene
+    - Provide specific anecdotes or turning points in the entity's life that explain motivations
+    - Ensure the background is clearly integrated with the world and scenario context
+    - Make it engaging and immersive, suitable to paste directly into a game's character sheet
+
+    Generate the background now:"""
 
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),
         ]
 
-        response = await self.provider.chat(messages)
+        # Use parameters that encourage longer, more detailed responses
+        response = await self.provider.chat(
+            messages,
+            temperature=0.75,  # Creative but slightly more consistent
+            max_tokens=800,  # Allow longer responses for richer backgrounds
+        )
         background = response.content.strip()
 
         # Clean up formatting

@@ -39,6 +39,9 @@ db = DatabaseManager(settings.database_path)
 orchestrators_db: Dict[str, TurnOrchestrator] = {}
 
 
+# ...existing code...
+
+
 class SessionConfig(BaseModel):
     """Advanced configuration for session creation"""
 
@@ -125,7 +128,11 @@ async def create_session(request: SessionCreateRequest):
         logger.error("Scenario must be compiled before creating a session")
         raise HTTPException(status_code=400, detail="Scenario must be compiled first")
 
-    # Create the scenario spec
+    # Create the scenario spec (ensure scenario_data is a mapping)
+    if not isinstance(scenario_data, dict) or "spec" not in scenario_data:
+        logger.error(f"Invalid scenario data for id: {request.scenario_id}")
+        raise HTTPException(status_code=500, detail="Invalid scenario data")
+
     spec_dict = scenario_data["spec"]
     spec = ScenarioSpec(**spec_dict)
     logger.info(f"Loaded scenario spec: {spec.name}")
@@ -230,6 +237,7 @@ async def stream_turns(session_id: str):
 
     session = db.get_session(session_id)
     if not session:
+        logger.warning(f"Session not found: {session_id}")
         raise HTTPException(status_code=404, detail="Session not found")
 
     async def generate_turns():
@@ -313,6 +321,16 @@ async def process_turn(session_id: str, request: SessionTurnRequest):
             # Update session reference in case it was reloaded
             orchestrator.set_session_ref(session)
 
+            # CRITICAL: Update orchestrator entities with session entities to preserve backgrounds
+            session_entities = session.get("entities", [])
+            if session_entities:
+                logger.info(
+                    f"[CharacterDebug] Updating cached orchestrator with {len(session_entities)} session entities"
+                )
+                orchestrator.spec.entities = session_entities
+                # Also update the compiler's spec
+                orchestrator.compiler.spec.entities = session_entities
+
         logger.debug(f"Orchestrator spec: {orchestrator.spec.name}")
 
         # Log state before turn
@@ -367,12 +385,65 @@ async def process_turn(session_id: str, request: SessionTurnRequest):
         turn_history = session.get("turn_history", [])
         turn_history.append(turn_record)
 
-        # Get entities from orchestrator - ALWAYS update to ensure backgrounds persist
-        entities = orchestrator.spec.entities
-        logger.debug(f"Entities after turn: {len(entities)} entities")
-        for entity in entities[:3]:  # Log first 3
-            logger.debug(
-                f"  - {entity.get('id')}: has background={bool(entity.get('background'))}"
+        # Get entities from orchestrator but preserve backgrounds from session
+        orchestrator_entities = orchestrator.spec.entities
+        original_entities = session.get("entities", [])
+
+        # Create a map of original entities by ID to preserve backgrounds
+        original_entities_map = {
+            entity.get("id"): entity for entity in original_entities
+        }
+
+        # Merge entities: use orchestrator entities but preserve backgrounds from originals
+        merged_entities = []
+        for orch_entity in orchestrator_entities:
+            entity_id = orch_entity.get("id")
+            # Start with orchestrator entity (may have new fields)
+            merged_entity = orch_entity.copy()
+
+            # If original entity had a background, preserve it
+            if entity_id in original_entities_map:
+                original_entity = original_entities_map[entity_id]
+                if original_entity.get("background") and not merged_entity.get(
+                    "background"
+                ):
+                    merged_entity["background"] = original_entity["background"]
+                    logger.debug(
+                        f"[CharacterDebug] Preserved background for {entity_id}"
+                    )
+
+            merged_entities.append(merged_entity)
+
+        # Add any entities that exist in session but not in orchestrator (shouldn't happen, but safety)
+        orchestrator_ids = {entity.get("id") for entity in orchestrator_entities}
+        for original_entity in original_entities:
+            if original_entity.get("id") not in orchestrator_ids:
+                merged_entities.append(original_entity)
+                logger.info(
+                    f"[CharacterDebug] Preserved orphaned entity: {original_entity.get('id')}"
+                )
+
+        entities = merged_entities
+        logger.info(
+            f"[CharacterDebug] Turn {current_turn} merged entities: {len(entities)} total entities"
+        )
+        for i, entity in enumerate(entities):
+            logger.info(
+                f"[CharacterDebug] Entity {i+1}: id='{entity.get('id')}', name='{entity.get('name')}', type='{entity.get('type')}', has_background={bool(entity.get('background'))}"
+            )
+            background = entity.get("background")
+            if background:
+                logger.debug(
+                    f"[CharacterDebug] Background preview for {entity.get('id')}: {background[:100]}..."
+                )
+
+        # Also log original session entities for comparison
+        logger.info(
+            f"[CharacterDebug] Original session had {len(original_entities)} entities"
+        )
+        for i, entity in enumerate(original_entities):
+            logger.info(
+                f"[CharacterDebug] Original entity {i+1}: id='{entity.get('id')}', name='{entity.get('name')}', has_background={bool(entity.get('background'))}"
             )
 
         # Get memories from orchestrator
@@ -781,3 +852,482 @@ async def get_cache_stats():
     stats = get_cache_statistics()
 
     return {"cache_stats": stats, "timestamp": datetime.now().isoformat()}
+
+
+@router.get("/{session_id}/relationships/{entity_id}")
+async def get_entity_relationships(session_id: str, entity_id: str):
+    """
+    Get relationship summary for a specific entity in a session.
+
+    Returns detailed relationship information including:
+    - Outgoing and incoming relationships
+    - Relationship types and sentiment scores
+    - Strongest relationships
+
+    Args:
+        session_id: Session identifier
+        entity_id: Entity identifier to get relationships for
+
+    Returns:
+        Dictionary with entity relationship summary
+
+    Raises:
+        HTTPException 404: Session or entity not found
+    """
+    logger.debug(
+        f"Retrieving relationships for entity {entity_id} in session {session_id}"
+    )
+
+    session = db.get_session(session_id)
+    if not session:
+        logger.warning(f"Session not found: {session_id}")
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Get orchestrator to access memory system
+    if session_id not in orchestrators_db:
+        from backend.engine.orchestrator import TurnOrchestrator
+        from backend.schemas import ScenarioSpec
+
+        spec = ScenarioSpec(**session["scenario_spec"])
+        temp_orchestrator = TurnOrchestrator(spec, session_id, db)
+        orchestrators_db[session_id] = temp_orchestrator
+
+    orchestrator = orchestrators_db[session_id]
+
+    # Get relationship summary from memory system
+    try:
+        relationship_summary = orchestrator.memory.get_entity_relationship_summary(
+            entity_id
+        )
+
+        return {
+            "session_id": session_id,
+            "entity_id": entity_id,
+            "relationship_summary": relationship_summary,
+        }
+    except Exception as e:
+        logger.error(f"Failed to get relationship summary for {entity_id}: {e}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Entity {entity_id} not found or has no relationships",
+        )
+
+
+@router.get("/{session_id}/graph/summary")
+async def get_graph_summary(session_id: str):
+    """
+    Get overall relationship graph statistics for a session.
+
+    Returns graph-wide statistics including:
+    - Total entities and relationships
+    - Relationship types distribution
+    - Most connected entities
+
+    Args:
+        session_id: Session identifier
+
+    Returns:
+        Dictionary with graph summary statistics
+
+    Raises:
+        HTTPException 404: Session not found
+    """
+    logger.debug(f"Retrieving graph summary for session {session_id}")
+
+    session = db.get_session(session_id)
+    if not session:
+        logger.warning(f"Session not found: {session_id}")
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Get orchestrator to access memory system
+    if session_id not in orchestrators_db:
+        from backend.engine.orchestrator import TurnOrchestrator
+        from backend.schemas import ScenarioSpec
+
+        spec = ScenarioSpec(**session["scenario_spec"])
+        temp_orchestrator = TurnOrchestrator(spec, session_id, db)
+        orchestrators_db[session_id] = temp_orchestrator
+
+    orchestrator = orchestrators_db[session_id]
+
+    # Get graph summary from memory system
+    try:
+        graph_summary = orchestrator.memory.get_graph_summary()
+
+        return {
+            "session_id": session_id,
+            "graph_summary": graph_summary,
+        }
+    except Exception as e:
+        logger.error(f"Failed to get graph summary for session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve graph summary")
+
+
+@router.delete("/{session_id}")
+async def delete_session(session_id: str):
+    """
+    Delete a session and clean up associated resources.
+
+    This endpoint:
+    1. Removes session from database
+    2. Deletes session-specific ChromaDB collection
+    3. Removes orchestrator from memory
+    4. Clears any cached data
+
+    Args:
+        session_id: Session identifier to delete
+
+    Returns:
+        Confirmation message
+
+    Raises:
+        HTTPException 404: Session not found
+    """
+    logger.info(f"Deleting session: {session_id}")
+
+    # Check if session exists
+    session = db.get_session(session_id)
+    if not session:
+        logger.warning(f"Session not found for deletion: {session_id}")
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    try:
+        # Delete from database
+        db.delete_session(session_id)
+        logger.info(f"Deleted session {session_id} from database")
+
+        # Delete ChromaDB collection if semantic search is available
+        try:
+            from backend.engine.memory_search import SemanticMemorySearch
+
+            # Create temporary semantic search instance to access collection
+            temp_search = SemanticMemorySearch(session_id)
+            if temp_search.is_available() and temp_search.vectorstore:
+                # Delete the session-specific collection
+                try:
+                    temp_search.vectorstore.delete_collection()
+                    logger.info(f"Deleted ChromaDB collection for session {session_id}")
+                except ValueError as ve:
+                    logger.warning(
+                        f"ChromaDB collection for session {session_id} not found: {ve}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to delete ChromaDB collection for session {session_id}: {e}"
+                    )
+        except Exception as e:
+            logger.warning(
+                f"Failed to delete ChromaDB collection for session {session_id}: {e}"
+            )
+
+        # Remove from orchestrator cache
+        if session_id in orchestrators_db:
+            del orchestrators_db[session_id]
+            logger.debug(f"Removed orchestrator for session {session_id}")
+
+        # Clear cache
+        memory_cache.clear_session(session_id)
+        logger.debug(f"Cleared cache for session {session_id}")
+
+        return {
+            "message": f"Session {session_id} deleted successfully",
+            "deleted_resources": [
+                "database",
+                "vector_collection",
+                "orchestrator",
+                "cache",
+            ],
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to delete session {session_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to delete session: {str(e)}"
+        )
+
+
+@router.get("/{session_id}/performance")
+async def get_session_performance(session_id: str):
+    """
+    Get performance metrics for a session.
+
+    Returns metrics including:
+    - Turn count and duration
+    - Tool call statistics
+    - Memory usage
+    - Response times
+
+    Args:
+        session_id: Session identifier
+
+    Returns:
+        Dictionary with performance metrics
+
+    Raises:
+        HTTPException 404: Session not found
+    """
+    logger.debug(f"Retrieving performance metrics for session {session_id}")
+
+    session = db.get_session(session_id)
+    if not session:
+        logger.warning(f"Session not found: {session_id}")
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Get orchestrator to access memory statistics
+    if session_id not in orchestrators_db:
+        from backend.engine.orchestrator import TurnOrchestrator
+        from backend.schemas import ScenarioSpec
+
+        spec = ScenarioSpec(**session["scenario_spec"])
+        temp_orchestrator = TurnOrchestrator(spec, session_id, db)
+        orchestrators_db[session_id] = temp_orchestrator
+
+    orchestrator = orchestrators_db[session_id]
+
+    # Collect performance metrics
+    memory_stats = orchestrator.memory.get_memory_statistics()
+
+    # Get semantic search stats if available
+    semantic_stats = {}
+    if (
+        hasattr(orchestrator.memory, "semantic_search")
+        and orchestrator.memory.semantic_search.is_available()
+    ):
+        semantic_stats = orchestrator.memory.semantic_search.get_stats()
+
+        return {
+            "session_id": session_id,
+            "turn_count": session.get("turn", 0),
+            "created_at": session.get("created_at"),
+            "memory_stats": memory_stats,
+            "semantic_search_stats": semantic_stats,
+            "relationship_graph_stats": orchestrator.memory.get_graph_summary(),
+        }
+
+
+@router.post("/{session_id}/enrichment/process")
+async def process_relationship_enrichment(
+    session_id: str, task_id: Optional[str] = None
+):
+    """
+    Process queued relationship enrichment analysis.
+
+    This endpoint triggers background processing of queued relationship
+    enrichment tasks using LLM analysis for more accurate relationship detection.
+
+    Args:
+        session_id: Session identifier
+        task_id: Optional specific task ID to process (processes all if not specified)
+
+    Returns:
+        Processing results and status
+    """
+    logger.info(f"Processing relationship enrichment for session {session_id}")
+
+    session = db.get_session(session_id)
+    if not session:
+        logger.warning(f"Session not found: {session_id}")
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Get orchestrator to access memory system
+    if session_id not in orchestrators_db:
+        from backend.engine.orchestrator import TurnOrchestrator
+        from backend.schemas import ScenarioSpec
+
+        spec = ScenarioSpec(**session["scenario_spec"])
+        temp_orchestrator = TurnOrchestrator(spec, session_id, db)
+        orchestrators_db[session_id] = temp_orchestrator
+
+    orchestrator = orchestrators_db[session_id]
+
+    # Get queued tasks
+    queued_tasks = orchestrator.memory.get_enrichment_queue_status()
+
+    if not queued_tasks:
+        return {
+            "session_id": session_id,
+            "message": "No enrichment tasks queued",
+            "processed": 0,
+            "results": [],
+        }
+
+    # Filter tasks if specific task_id provided
+    if task_id:
+        queued_tasks = [task for task in queued_tasks if task["id"] == task_id]
+        if not queued_tasks:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+    # Process tasks
+    results = []
+    for task in queued_tasks:
+        if task["status"] == "queued":
+            success = await orchestrator.memory.relationship_graph.process_enrichment_analysis(
+                task["id"], orchestrator.provider
+            )
+            results.append(
+                {
+                    "task_id": task["id"],
+                    "success": success,
+                    "status": "completed" if success else "failed",
+                }
+            )
+
+    # Clear completed tasks
+    cleared_count = orchestrator.memory.clear_completed_enrichments()
+
+    return {
+        "session_id": session_id,
+        "processed": len(results),
+        "results": results,
+        "cleared_completed": cleared_count,
+        "remaining_queued": len(orchestrator.memory.get_enrichment_queue_status()),
+    }
+
+
+@router.post("/{session_id}/regenerate-backgrounds")
+async def regenerate_character_backgrounds(session_id: str):
+    """
+    Regenerate backgrounds for characters that are missing them.
+
+    This is a utility endpoint to fix character background issues.
+    """
+    logger.info(f"Regenerating character backgrounds for session {session_id}")
+
+    session = db.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Get scenario spec to regenerate backgrounds
+    scenario_id = session["scenario_id"]
+    scenario = db.get_scenario(scenario_id)
+    if not scenario:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+
+    spec = ScenarioSpec(**scenario["spec"])
+    world_background = session.get("world_background", "")
+    entities = session.get("entities", [])
+
+    # Find entities without backgrounds - include characters, creatures, and factions
+    entities_needing_backgrounds = []
+    entities_with_backgrounds = []
+
+    # Define which entity types should have backgrounds
+    background_entity_types = {"character", "creature", "faction", "npc", "player"}
+
+    for entity in entities:
+        entity_type = entity.get("type", "").lower()
+        entity_id = entity.get("id", "unknown")
+
+        if not entity.get("background") and entity_type in background_entity_types:
+            entities_needing_backgrounds.append(entity)
+            logger.info(
+                f"Entity '{entity_id}' (type: {entity_type}) needs background regeneration"
+            )
+        else:
+            entities_with_backgrounds.append(entity)
+            if entity.get("background"):
+                logger.debug(
+                    f"Entity '{entity_id}' (type: {entity_type}) already has background"
+                )
+            else:
+                logger.debug(
+                    f"Entity '{entity_id}' (type: {entity_type}) doesn't need background (not a background type)"
+                )
+
+    if not entities_needing_backgrounds:
+        return {"message": "All entities already have backgrounds", "regenerated": 0}
+
+    # Use initializer to generate backgrounds
+    from backend.engine.initializer import SessionInitializer
+
+    initializer = SessionInitializer()
+
+    updated_entities = []
+    regenerated_count = 0
+
+    for entity in entities_needing_backgrounds:
+        try:
+            background = await initializer._generate_single_entity_background(
+                entity, spec, world_background
+            )
+            updated_entity = entity.copy()
+            updated_entity["background"] = background
+            updated_entities.append(updated_entity)
+            regenerated_count += 1
+            logger.info(f"Generated background for '{entity.get('id')}'")
+        except Exception as e:
+            logger.error(f"Failed to generate background for '{entity.get('id')}': {e}")
+            updated_entities.append(entity)  # Keep original without background
+
+    # Combine all entities
+    all_entities = entities_with_backgrounds + updated_entities
+
+    # Update session in database
+    db.update_session(session_id, {"entities": all_entities})
+
+    # Update cached orchestrator if it exists
+    if session_id in orchestrators_db:
+        orchestrator = orchestrators_db[session_id]
+        orchestrator.spec.entities = all_entities
+        orchestrator.compiler.spec.entities = all_entities
+        logger.info("Updated cached orchestrator entities")
+
+    return {
+        "message": f"Regenerated backgrounds for {regenerated_count} entities",
+        "regenerated": regenerated_count,
+        "total_entities": len(all_entities),
+    }
+
+
+@router.get("/{session_id}/enrichment/queue")
+async def get_enrichment_queue(session_id: str):
+    """
+    Get status of queued relationship enrichment tasks.
+
+    Returns information about pending, processing, and completed
+    relationship enrichment analysis tasks.
+
+    Args:
+        session_id: Session identifier
+
+    Returns:
+        Queue status and task information
+    """
+    logger.debug(f"Retrieving enrichment queue for session {session_id}")
+
+    session = db.get_session(session_id)
+    if not session:
+        logger.warning(f"Session not found: {session_id}")
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Get orchestrator to access memory system
+    if session_id not in orchestrators_db:
+        from backend.engine.orchestrator import TurnOrchestrator
+        from backend.schemas import ScenarioSpec
+
+        spec = ScenarioSpec(**session["scenario_spec"])
+        temp_orchestrator = TurnOrchestrator(spec, session_id, db)
+        orchestrators_db[session_id] = temp_orchestrator
+
+    orchestrator = orchestrators_db[session_id]
+
+    # Get queue status
+    queue_status = orchestrator.memory.get_enrichment_queue_status()
+
+    # Group by status
+    queued = [task for task in queue_status if task["status"] == "queued"]
+    processing = [task for task in queue_status if task["status"] == "processing"]
+    completed = [task for task in queue_status if task["status"] == "completed"]
+    failed = [task for task in queue_status if task["status"] == "failed"]
+
+    return {
+        "session_id": session_id,
+        "total_tasks": len(queue_status),
+        "status_summary": {
+            "queued": len(queued),
+            "processing": len(processing),
+            "completed": len(completed),
+            "failed": len(failed),
+        },
+        "tasks": queue_status,
+    }

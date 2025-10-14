@@ -10,6 +10,9 @@ from langchain.tools import BaseTool
 from backend.schemas import Action, ScenarioSpec
 from backend.schemas.outcome import StateChange
 from backend.utils.jsonlogic import JSONLogicEvaluator
+from backend.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class ScenarioCompiler:
@@ -40,6 +43,12 @@ class ScenarioCompiler:
 
         # Add semantic search tool
         self.tools.append(self._create_semantic_search_tool())
+
+        # Add batch memory tool
+        self.tools.append(self._create_batch_memory_tool())
+
+        # Add stateful read tool with caching
+        self.tools.append(self._create_stateful_read_tool())
 
     def _create_read_state_tool(self) -> BaseTool:
         """Create tool for reading game state"""
@@ -166,7 +175,11 @@ class ScenarioCompiler:
             )
 
             def _run(
-                self, id: str, type: str, name: str, background: Optional[str] = None
+                self,
+                id: str,
+                entity_type: str,
+                name: str,
+                background: Optional[str] = None,
             ) -> str:
                 """Create a new character"""
                 try:
@@ -180,28 +193,42 @@ class ScenarioCompiler:
                             return f"Error: Character with id '{id}' already exists. Use their existing id instead of creating a duplicate."
 
                     # Build entity data
-                    entity_data = {"id": id, "type": type, "name": name}
+                    entity_data = {"id": id, "type": entity_type, "name": name}
                     if background:
                         entity_data["background"] = background
 
                     # Add to entities list
                     compiler.spec.entities.append(entity_data)
+                    logger.info(
+                        f"[CharacterCreation] Added new character '{name}' (id: {id}) to spec.entities. Total entities: {len(compiler.spec.entities)}"
+                    )
 
                     # Also add to state.entities if it exists
                     state_entities = compiler._get_value_at_path("entities")
                     if isinstance(state_entities, list):
                         state_entities.append(entity_data)
                         compiler._set_value_at_path("entities", state_entities)
+                        logger.info(
+                            f"[CharacterCreation] Also added '{name}' to state.entities. Total state entities: {len(state_entities)}"
+                        )
+                    else:
+                        logger.warning(
+                            f"[CharacterCreation] state.entities is not a list, cannot add {name} there. Type: {type(state_entities)}"
+                        )
 
-                    return f"Character created: {name} ({id}) - {type}"
+                    return f"Character created: {name} ({id}) - {entity_type}"
                 except Exception as e:
                     return f"Error creating character: {e}"
 
             async def _arun(
-                self, id: str, type: str, name: str, background: Optional[str] = None
+                self,
+                id: str,
+                entity_type: str,
+                name: str,
+                background: Optional[str] = None,
             ) -> str:
                 """Async version of _run"""
-                return self._run(id, type, name, background)
+                return self._run(id, entity_type, name, background)
 
         tool = CreateCharacterTool()
         tool._compiler = self  # type: ignore
@@ -255,7 +282,8 @@ class ScenarioCompiler:
                 "Record a memory for an entity. Specify entity_id, content, and visibility (private or public). "
                 "🔗 PRIORITIZE relationship memories when characters interact! "
                 "Use scope='relationship' for interactions between characters. "
-                "Examples: add_memory(entity_id='elena', content='Growing to trust Marcus after the rescue', visibility='private')"
+                "Include keywords: 'trust', 'fear', 'love', 'alliance', 'rivalry' for auto-relationship extraction. "
+                "Examples: add_memory(entity_id='elena', content='Growing to trust Marcus after the rescue', visibility='private', scope='relationship')"
             )
 
             def _run(
@@ -394,6 +422,124 @@ class ScenarioCompiler:
                 return self._run(query, entity_id, scope, limit, threshold)
 
         tool = SemanticSearchTool()
+        tool._compiler = self  # type: ignore
+        return tool
+
+    def _create_batch_memory_tool(self) -> BaseTool:
+        """Create tool for batch memory updates"""
+
+        class BatchMemoryTool(BaseTool):
+            name: str = "add_memories"
+            description: str = (
+                "Add multiple memories in a single call to reduce tool usage. "
+                "Accepts a list of memory objects with entity_id, content, visibility, and scope. "
+                "Use this for relationship tracking: include 'trust', 'fear', 'love', 'alliance' keywords in content. "
+                "Examples: add_memories([{entity_id: 'elena', content: 'Growing to trust Marcus after rescue', visibility: 'private', scope: 'relationship'}])"
+            )
+
+            def _run(
+                self,
+                memories: List[Dict[str, Any]],
+            ) -> str:
+                """Add multiple memories at once"""
+                try:
+                    compiler = getattr(self, "_compiler", None)
+                    if not compiler or not hasattr(compiler, "_orchestrator"):
+                        return "Error: No orchestrator available"
+
+                    orchestrator = compiler._orchestrator
+                    results = []
+
+                    for memory in memories:
+                        entity_id = memory.get("entity_id")
+                        content = memory.get("content", "")
+                        visibility = memory.get("visibility", "private")
+                        scope = memory.get("scope", "general")
+
+                        if not entity_id or not content:
+                            results.append(f"Skipped invalid memory: {memory}")
+                            continue
+
+                        # Use the existing memory tool logic
+                        vis_enum = "private" if visibility == "private" else "public"
+
+                        orchestrator.memory.update_scoped_memory(
+                            entity_id=entity_id,
+                            content=content,
+                            scope=scope,  # type: ignore
+                            visibility=vis_enum,
+                        )
+
+                        results.append(
+                            f"Memory added for {entity_id} ({scope}): {content[:50]}..."
+                        )
+
+                    return f"Batch memory update completed. {len(results)} memories processed."
+
+                except Exception as e:
+                    return f"Error in batch memory update: {e}"
+
+            async def _arun(
+                self,
+                memories: List[Dict[str, Any]],
+            ) -> str:
+                """Async version of _run"""
+                return self._run(memories)
+
+        tool = BatchMemoryTool()
+        tool._compiler = self  # type: ignore
+        return tool
+
+    def _create_stateful_read_tool(self) -> BaseTool:
+        """Create tool for reading game state with caching"""
+
+        class StatefulReadTool(BaseTool):
+            name: str = "read_state_cached"
+            description: str = (
+                "Read game state with caching for recent values. Use use_cache=True to avoid repeated reads. "
+                "Examples: read_state_cached('state.player.health', use_cache=True)"
+            )
+
+            def _run(
+                self,
+                path: str,
+                use_cache: bool = True,
+            ) -> str:
+                """Read state value with optional caching"""
+                try:
+                    compiler = getattr(self, "_compiler", None)
+                    if not compiler:
+                        return "Error: No compiler available"
+
+                    # Check cache first if requested
+                    if use_cache:
+                        # Simple in-memory cache per compiler instance
+                        cache_key = f"state_cache_{path}"
+                        if hasattr(compiler, cache_key):
+                            cached_value = getattr(compiler, cache_key)
+                            return f"Cached: {cached_value}"
+
+                    # Get fresh value
+                    value = compiler._get_value_at_path(path)
+
+                    # Cache the value if requested
+                    if use_cache:
+                        setattr(compiler, cache_key, value)
+
+                    return f"{value}" if value is not None else "null"
+
+                except Exception as e:
+                    return f"Error reading state: {e}"
+
+            async def _arun(
+                self,
+                path: str,
+                use_cache: bool = True,
+            ) -> str:
+                """Async version of _run"""
+                return self._run(path, use_cache)
+
+        tool = StatefulReadTool()
         tool._compiler = self  # type: ignore
         return tool
 

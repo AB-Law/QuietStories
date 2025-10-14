@@ -25,14 +25,14 @@ logger = get_logger(__name__)
 class ContextCache:
     """
     Cache for frequently used context strings to reduce repeated token usage.
-    
+
     Uses LRU-style eviction when cache grows too large.
     """
 
     def __init__(self, max_size: int = 100):
         """
         Initialize context cache.
-        
+
         Args:
             max_size: Maximum number of cached items
         """
@@ -89,7 +89,7 @@ def get_context_cache() -> ContextCache:
 class TokenEstimator:
     """
     Estimate token usage for prompt optimization.
-    
+
     Uses a simple character-based estimation for speed.
     For more accuracy, could integrate tiktoken or similar.
     """
@@ -98,12 +98,12 @@ class TokenEstimator:
     def estimate_tokens(text: str) -> int:
         """
         Estimate token count for text.
-        
+
         Uses rough approximation: ~4 characters per token for English text.
-        
+
         Args:
             text: Input text
-            
+
         Returns:
             Estimated token count
         """
@@ -113,10 +113,10 @@ class TokenEstimator:
     def estimate_messages_tokens(messages: List[BaseMessage]) -> int:
         """
         Estimate total tokens in a message list.
-        
+
         Args:
             messages: List of LangChain messages
-            
+
         Returns:
             Estimated total token count
         """
@@ -132,17 +132,17 @@ class TokenEstimator:
                         total += TokenEstimator.estimate_tokens(item)
                     elif isinstance(item, dict):
                         total += TokenEstimator.estimate_tokens(json.dumps(item))
-        
+
         # Add overhead for message formatting (role, etc.)
         total += len(messages) * 4
-        
+
         return total
 
 
 class MemorySummarizer:
     """
     Summarize and compress memory entries to reduce token usage.
-    
+
     Strategies:
     1. Remove redundant information
     2. Merge similar memories
@@ -151,18 +151,18 @@ class MemorySummarizer:
 
     @staticmethod
     def summarize_memories(
-        memories: List[Dict[str, Any]], 
+        memories: List[Dict[str, Any]],
         max_memories: int = 10,
-        importance_threshold: int = 3
+        importance_threshold: int = 3,
     ) -> List[Dict[str, Any]]:
         """
         Summarize memory list by filtering and prioritizing.
-        
+
         Args:
             memories: List of memory entries
             max_memories: Maximum memories to keep
             importance_threshold: Minimum importance to keep (1-10)
-            
+
         Returns:
             Filtered and prioritized memory list
         """
@@ -171,51 +171,50 @@ class MemorySummarizer:
 
         # Filter by importance
         important_memories = [
-            m for m in memories 
-            if m.get("importance", 5) >= importance_threshold
+            m for m in memories if m.get("importance", 5) >= importance_threshold
         ]
 
         # Sort by importance and recency (turn)
         sorted_memories = sorted(
             important_memories,
             key=lambda m: (m.get("importance", 5), m.get("turn", 0)),
-            reverse=True
+            reverse=True,
         )
 
         # Take top N
         result = sorted_memories[:max_memories]
-        
+
         if len(memories) > len(result):
             logger.debug(
                 f"[Summarizer] Reduced memories from {len(memories)} to {len(result)}"
             )
-        
+
         return result
 
     @staticmethod
     def compress_memory_content(content: str, max_length: int = 200) -> str:
         """
         Compress memory content to reduce token usage.
-        
+
         Args:
             content: Memory content string
             max_length: Maximum character length
-            
+
         Returns:
             Compressed content string
         """
         if len(content) <= max_length:
             return content
-        
+
         # Simple truncation with ellipsis
         # Could be improved with extractive summarization
-        return content[:max_length - 3] + "..."
+        return content[: max_length - 3] + "..."
 
 
 class ContextOptimizer:
     """
     Optimize context sent to LLM by reducing redundancy and token usage.
-    
+
     Strategies:
     1. Smart turn history windowing
     2. Memory summarization
@@ -228,11 +227,11 @@ class ContextOptimizer:
         max_turn_history: int = 10,
         max_memories_per_entity: int = 10,
         max_context_tokens: int = 4000,
-        enable_caching: bool = True
+        enable_caching: bool = True,
     ):
         """
         Initialize context optimizer.
-        
+
         Args:
             max_turn_history: Maximum turns to include in history
             max_memories_per_entity: Maximum memories per entity
@@ -247,17 +246,15 @@ class ContextOptimizer:
         self.token_estimator = TokenEstimator()
 
     def optimize_messages(
-        self, 
-        messages: List[BaseMessage],
-        preserve_system: bool = True
+        self, messages: List[BaseMessage], preserve_system: bool = True
     ) -> List[BaseMessage]:
         """
         Optimize message list to reduce token usage.
-        
+
         Args:
             messages: Original message list
             preserve_system: Always keep system messages
-            
+
         Returns:
             Optimized message list
         """
@@ -290,7 +287,7 @@ class ContextOptimizer:
         system_tokens = self.token_estimator.estimate_messages_tokens(system_messages)
         remaining_budget = self.max_context_tokens - system_tokens
 
-        optimized_others = []
+        optimized_others: List[BaseMessage] = []
         current_budget = 0
 
         # Add messages from most recent to oldest
@@ -304,7 +301,7 @@ class ContextOptimizer:
 
         result = system_messages + optimized_others
         new_tokens = self.token_estimator.estimate_messages_tokens(result)
-        
+
         logger.info(
             f"[Optimizer] Reduced from {len(messages)} to {len(result)} messages "
             f"({current_tokens} -> {new_tokens} tokens)"
@@ -313,15 +310,14 @@ class ContextOptimizer:
         return result
 
     def optimize_turn_history(
-        self, 
-        turn_history: List[Dict[str, Any]]
+        self, turn_history: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """
         Optimize turn history by keeping only recent relevant turns.
-        
+
         Args:
             turn_history: Full turn history
-            
+
         Returns:
             Optimized turn history
         """
@@ -329,46 +325,44 @@ class ContextOptimizer:
             return turn_history
 
         # Keep most recent turns
-        optimized = turn_history[-self.max_turn_history:]
-        
+        optimized = turn_history[-self.max_turn_history :]
+
         logger.debug(
             f"[Optimizer] Turn history: {len(turn_history)} -> {len(optimized)} turns"
         )
-        
+
         return optimized
 
     def optimize_entity_memories(
         self,
         private_memory: Dict[str, List[Dict[str, Any]]],
-        public_memory: Dict[str, List[Dict[str, Any]]]
+        public_memory: Dict[str, List[Dict[str, Any]]],
     ) -> Tuple[Dict[str, List[Dict[str, Any]]], Dict[str, List[Dict[str, Any]]]]:
         """
         Optimize entity memories by summarizing and filtering.
-        
+
         Args:
             private_memory: Private memories by entity
             public_memory: Public memories by entity
-            
+
         Returns:
             Tuple of (optimized_private, optimized_public)
         """
         summarizer = MemorySummarizer()
-        
+
         optimized_private = {}
         optimized_public = {}
 
         # Optimize private memories
         for entity_id, memories in private_memory.items():
             optimized_private[entity_id] = summarizer.summarize_memories(
-                memories, 
-                max_memories=self.max_memories_per_entity
+                memories, max_memories=self.max_memories_per_entity
             )
 
         # Optimize public memories
         for entity_id, memories in public_memory.items():
             optimized_public[entity_id] = summarizer.summarize_memories(
-                memories,
-                max_memories=self.max_memories_per_entity
+                memories, max_memories=self.max_memories_per_entity
             )
 
         logger.debug(
@@ -387,14 +381,14 @@ class ContextOptimizer:
     ) -> str:
         """
         Build optimized context string from game state.
-        
+
         Args:
             game_state: Current game state
             entities: Entity list
             turn_history: Turn history (optional)
             private_memory: Private memories (optional)
             public_memory: Public memories (optional)
-            
+
         Returns:
             Optimized context string
         """
@@ -402,7 +396,7 @@ class ContextOptimizer:
         state_hash = hashlib.md5(
             json.dumps(game_state, sort_keys=True).encode()
         ).hexdigest()[:16]
-        
+
         cache_key = f"context_{state_hash}"
 
         # Check cache if enabled
@@ -431,8 +425,7 @@ class ContextOptimizer:
         # Memories (summarized)
         if private_memory or public_memory:
             opt_private, opt_public = self.optimize_entity_memories(
-                private_memory or {},
-                public_memory or {}
+                private_memory or {}, public_memory or {}
             )
             memory_summary = self._summarize_memories(opt_private, opt_public)
             if memory_summary:
@@ -454,20 +447,20 @@ class ContextOptimizer:
             name = entity.get("name", entity.get("id", "Unknown"))
             entity_type = entity.get("type", "Unknown")
             background = entity.get("background", "")
-            
+
             # Truncate long backgrounds
             if background and len(background) > 150:
                 background = background[:147] + "..."
-            
+
             summary = f"- {name} ({entity_type})"
             if background:
                 summary += f": {background}"
-            
+
             summaries.append(summary)
-        
+
         if len(entities) > 10:
             summaries.append(f"... and {len(entities) - 10} more entities")
-        
+
         return "\n".join(summaries)
 
     def _summarize_turn_history(self, turn_history: List[Dict[str, Any]]) -> str:
@@ -477,30 +470,30 @@ class ContextOptimizer:
             turn_num = turn.get("turn", "?")
             action = turn.get("user_action", "")
             narrative = turn.get("narrative", "")
-            
+
             # Truncate long narratives
             if narrative and len(narrative) > 200:
                 narrative = narrative[:197] + "..."
-            
+
             summary = f"Turn {turn_num}: {action}\n  → {narrative}"
             summaries.append(summary)
-        
+
         return "\n\n".join(summaries)
 
     def _summarize_memories(
         self,
         private_memory: Dict[str, List[Dict[str, Any]]],
-        public_memory: Dict[str, List[Dict[str, Any]]]
+        public_memory: Dict[str, List[Dict[str, Any]]],
     ) -> str:
         """Summarize memories for context."""
         summaries = []
-        
+
         # Combine all memories
         all_entities = set(list(private_memory.keys()) + list(public_memory.keys()))
-        
+
         for entity_id in list(all_entities)[:5]:  # Limit to 5 entities
             entity_summaries = []
-            
+
             # Private memories
             if entity_id in private_memory:
                 for mem in private_memory[entity_id][:3]:  # Max 3 per entity
@@ -508,7 +501,7 @@ class ContextOptimizer:
                     if len(content) > 100:
                         content = content[:97] + "..."
                     entity_summaries.append(f"  [Private] {content}")
-            
+
             # Public memories
             if entity_id in public_memory:
                 for mem in public_memory[entity_id][:3]:  # Max 3 per entity
@@ -516,10 +509,10 @@ class ContextOptimizer:
                     if len(content) > 100:
                         content = content[:97] + "..."
                     entity_summaries.append(f"  [Public] {content}")
-            
+
             if entity_summaries:
                 summaries.append(f"{entity_id}:\n" + "\n".join(entity_summaries))
-        
+
         return "\n\n".join(summaries)
 
 
@@ -528,7 +521,7 @@ _global_optimizer = ContextOptimizer(
     max_turn_history=10,
     max_memories_per_entity=10,
     max_context_tokens=4000,
-    enable_caching=True
+    enable_caching=True,
 )
 
 
@@ -541,11 +534,11 @@ def configure_optimizer(
     max_turn_history: Optional[int] = None,
     max_memories_per_entity: Optional[int] = None,
     max_context_tokens: Optional[int] = None,
-    enable_caching: Optional[bool] = None
+    enable_caching: Optional[bool] = None,
 ):
     """
     Configure the global optimizer settings.
-    
+
     Args:
         max_turn_history: Maximum turns in history
         max_memories_per_entity: Maximum memories per entity
@@ -553,7 +546,7 @@ def configure_optimizer(
         enable_caching: Whether to enable caching
     """
     global _global_optimizer
-    
+
     if max_turn_history is not None:
         _global_optimizer.max_turn_history = max_turn_history
     if max_memories_per_entity is not None:
@@ -562,6 +555,5 @@ def configure_optimizer(
         _global_optimizer.max_context_tokens = max_context_tokens
     if enable_caching is not None:
         _global_optimizer.enable_caching = enable_caching
-    
-    logger.info(f"[Optimizer] Configuration updated")
 
+    logger.info(f"[Optimizer] Configuration updated")

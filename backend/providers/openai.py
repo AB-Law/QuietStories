@@ -3,6 +3,7 @@ OpenAI provider implementation using LangChain
 """
 
 import json
+import time
 from typing import Any, Dict, List, Optional, Union
 
 from langchain.schema import BaseMessage
@@ -35,6 +36,10 @@ class OpenAIProvider(BaseProvider):
     ) -> Union[ProviderResponse, Any]:
         """Send chat request to OpenAI API using LangChain"""
 
+        # Log the LLM call
+        call_id = self._log_llm_call(messages, tools, **kwargs)
+        start_time = time.time()
+
         try:
             # Configure LLM with parameters
             llm = self.llm
@@ -50,6 +55,9 @@ class OpenAIProvider(BaseProvider):
                 response = await llm_with_tools.ainvoke(messages)
             else:
                 response = await llm.ainvoke(messages)
+
+            duration_ms = round((time.time() - start_time) * 1000, 2)
+            self._log_llm_response(call_id, response, duration_ms)
 
             # Handle streaming
             if stream:
@@ -82,12 +90,15 @@ class OpenAIProvider(BaseProvider):
             )
 
         except Exception as e:
+            duration_ms = round((time.time() - start_time) * 1000, 2)
+            self._log_llm_response(call_id, None, duration_ms, error=e)
             raise Exception(f"OpenAI API error: {e}")
 
     async def _handle_streaming_response(self, llm, messages, tools, **kwargs):
         """Handle streaming responses"""
-        # For now, return the LLM for streaming
-        # This can be enhanced with proper streaming support
+        # Return the LLM configured for streaming
+        if tools:
+            return llm.bind_tools(tools)
         return llm
 
     async def health_check(self) -> bool:
