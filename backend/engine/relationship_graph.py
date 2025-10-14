@@ -46,6 +46,7 @@ class RelationshipGraph:
         self.nodes: Set[str] = set()
         self.edges: Dict[Tuple[str, str], RelationshipEdge] = {}
         self.reverse_edges: Dict[str, List[Tuple[str, str]]] = defaultdict(lambda: [])
+        self.enrichment_queue: List[Dict[str, Any]] = []
 
     def add_relationship(
         self,
@@ -368,6 +369,162 @@ class RelationshipGraph:
             self.edges[edge_key] = edge
             self.reverse_edges[edge.to_entity].append(edge_key)
 
+    def queue_enrichment_analysis(
+        self, content: str, entity_id: str, related_entities: List[str]
+    ) -> str:
+        """
+        Queue relationship enrichment analysis for ambiguous relationships.
+
+        Args:
+            content: Memory content to analyze
+            entity_id: Entity that recorded this memory
+            related_entities: List of entities mentioned in the content
+
+        Returns:
+            Analysis ID for tracking the queued task
+        """
+        analysis_id = f"analysis_{entity_id}_{len(self.enrichment_queue)}"
+
+        # Create enrichment task
+        task = {
+            "id": analysis_id,
+            "content": content,
+            "entity_id": entity_id,
+            "related_entities": related_entities,
+            "status": "queued",
+            "created_at": datetime.now(),
+        }
+
+        self.enrichment_queue.append(task)
+        logger.debug(f"Queued relationship enrichment analysis: {analysis_id}")
+
+        return analysis_id
+
+    def get_enrichment_queue_status(self) -> List[Dict[str, Any]]:
+        """Get status of all queued enrichment tasks"""
+        return self.enrichment_queue.copy()
+
+    def clear_completed_enrichments(self) -> int:
+        """Remove completed enrichment tasks from queue"""
+        initial_count = len(self.enrichment_queue)
+        self.enrichment_queue = [
+            task for task in self.enrichment_queue if task["status"] != "completed"
+        ]
+        return initial_count - len(self.enrichment_queue)
+
+    async def process_enrichment_analysis(self, task_id: str, provider=None) -> bool:
+        """
+        Process a queued enrichment analysis using LLM.
+
+        Args:
+            task_id: ID of the task to process
+            provider: Optional LLM provider instance
+
+        Returns:
+            True if analysis completed successfully, False otherwise
+        """
+        # Find the task
+        task = None
+        for t in self.enrichment_queue:
+            if t["id"] == task_id:
+                task = t
+                break
+
+        if not task or task["status"] != "queued":
+            logger.warning(f"Task {task_id} not found or not queued")
+            return False
+
+        if not provider:
+            logger.warning("No provider available for enrichment analysis")
+            task["status"] = "failed"
+            return False
+
+        try:
+            task["status"] = "processing"
+
+            # Create analysis prompt
+            analysis_prompt = f"""Analyze this relationship memory for detailed sentiment and type:
+
+MEMORY CONTENT: "{task['content']}"
+
+ENTITIES INVOLVED: {task['entity_id']} and {', '.join(task['related_entities'])}
+
+Provide detailed analysis in this exact JSON format:
+{{
+  "sentiment": <float between -1.0 and 1.0, where -1.0 is very negative, 0.0 is neutral, 1.0 is very positive>,
+  "relationship_type": "<one of: family, friendship, romantic, adversarial, mentor, professional, acquaintance>",
+  "confidence": <float between 0.0 and 1.0 indicating how confident you are in this analysis>,
+  "reasoning": "<brief explanation of your analysis>",
+  "specific_relationships": [
+    {{
+      "from_entity": "{task['entity_id']}",
+      "to_entity": "<specific entity name>",
+      "type": "<specific type>",
+      "sentiment": <sentiment value>
+    }}
+  ]
+}}
+
+Respond with ONLY the JSON object:"""
+
+            from langchain.schema import HumanMessage, SystemMessage
+
+            response = await provider.chat(
+                [
+                    SystemMessage(
+                        content="You are an expert at analyzing human relationships and emotions. Provide precise numerical sentiment scores and accurate relationship classifications."
+                    ),
+                    HumanMessage(content=analysis_prompt),
+                ]
+            )
+
+            # Extract JSON from response
+            response_content = (
+                response.content if hasattr(response, "content") else str(response)
+            )
+
+            import json
+            import re
+
+            # Look for JSON object in response
+            json_match = re.search(r"\{[^}]+\}", response_content, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                analysis = json.loads(json_str)
+
+                # Validate required fields
+                if all(
+                    key in analysis
+                    for key in ["sentiment", "relationship_type", "confidence"]
+                ):
+                    # Update the relationship in the graph
+                    for rel in analysis.get("specific_relationships", []):
+                        self.add_relationship(
+                            from_entity=rel["from_entity"],
+                            to_entity=rel["to_entity"],
+                            relationship_type=rel["type"],
+                            sentiment=rel["sentiment"],
+                            strength=analysis["confidence"],
+                            evidence=[task_id],
+                        )
+
+                    task["status"] = "completed"
+                    task["result"] = analysis
+                    logger.info(f"Enrichment analysis completed for task {task_id}")
+                    return True
+
+            # If JSON parsing fails, mark as failed
+            logger.warning(
+                f"Failed to parse enrichment analysis response: {response_content[:100]}"
+            )
+            task["status"] = "failed"
+
+        except Exception as e:
+            logger.error(f"Enrichment analysis failed for task {task_id}: {e}")
+            task["status"] = "failed"
+
+        return False
+
 
 def extract_relationship_from_content(
     content: str,
@@ -448,7 +605,10 @@ def extract_relationship_from_content(
         word in content_lower for word in ["romantic", "love", "partner", "spouse"]
     ):
         relationship_type = "romantic"
-    elif any(word in content_lower for word in ["enemy", "rival", "opponent", "foe"]):
+    elif any(
+        word in content_lower
+        for word in ["fear", "enemy", "rival", "opponent", "foe", "betray"]
+    ):
         relationship_type = "adversarial"
     elif any(
         word in content_lower for word in ["mentor", "teacher", "student", "guide"]

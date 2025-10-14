@@ -94,6 +94,9 @@ class MemoryManager:
 
         self.scoped_memory[entity_id][scope][visibility].append(memory_entry)
 
+        # Add to semantic search index
+        memory_id = f"{entity_id}_{scope}_{self.turn_count}_{len(self.scoped_memory[entity_id][scope][visibility])}"
+
         # Auto-extract relationships if scope is "relationship"
         if scope == "relationship" and related_entities:
             # Extract relationship data for graph
@@ -101,17 +104,22 @@ class MemoryManager:
                 content, entity_id, related_entities
             )
             if relationship_data:
-                # Add to relationship graph
+                # Add to relationship graph immediately
                 self.relationship_graph.add_relationship(
                     from_entity=relationship_data["from_entity"],
                     to_entity=relationship_data["to_entity"],
                     relationship_type=relationship_data["relationship_type"],
                     sentiment=relationship_data["sentiment"],
                     strength=relationship_data["strength"],
+                    evidence=[memory_id],
                 )
 
-        # Add to semantic search index
-        memory_id = f"{entity_id}_{scope}_{self.turn_count}_{len(self.scoped_memory[entity_id][scope][visibility])}"
+                # Queue for enrichment analysis if sentiment is neutral or ambiguous
+                sentiment = relationship_data["sentiment"]
+                if -0.2 <= sentiment <= 0.2:  # Neutral sentiment range
+                    self.queue_relationship_enrichment(
+                        content, entity_id, related_entities
+                    )
         metadata = {
             "entity_id": entity_id,
             "scope": scope,
@@ -250,6 +258,22 @@ class MemoryManager:
     def get_entity_relationship_summary(self, entity_id: str) -> Dict[str, Any]:
         """Get relationship summary for an entity from the relationship graph"""
         return self.relationship_graph.get_relationship_summary(entity_id)
+
+    def queue_relationship_enrichment(
+        self, content: str, entity_id: str, related_entities: List[str]
+    ) -> str:
+        """Queue relationship enrichment analysis for ambiguous relationships"""
+        return self.relationship_graph.queue_enrichment_analysis(
+            content, entity_id, related_entities
+        )
+
+    def get_enrichment_queue_status(self) -> List[Dict[str, Any]]:
+        """Get status of queued enrichment tasks"""
+        return self.relationship_graph.get_enrichment_queue_status()
+
+    def clear_completed_enrichments(self) -> int:
+        """Clear completed enrichment tasks from queue"""
+        return self.relationship_graph.clear_completed_enrichments()
 
     def get_relationships(
         self,
