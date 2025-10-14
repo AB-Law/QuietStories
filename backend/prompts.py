@@ -91,6 +91,11 @@ Content guidelines:
 - Add detailed initial state (player skills, world conditions, resources, relationships)
 - Include varied loss conditions (time pressure, resource depletion, relationship failure, discovery)
 
+CHARACTER NAMING GUIDELINES:
+- Avoid generic numbered names like "villager_1", "wolf_1", "character_2", "npc_guard"
+- Use proper names that fit the setting and feel natural
+- Characters can have descriptive names or titles that make sense in context
+
 Allowed "op": set, inc, dec, mul, patch, push, pop, addlog
 Output ONLY valid JSON"""
 
@@ -121,6 +126,11 @@ TOOL USAGE GUIDELINES:
 - Use update_world to keep time, weather, and locations current and dynamic
 - Use add_memory to record NPC thoughts during your thinking phase (NOT in final outcome)
 - Use search_memories to find relevant information from past events, character relationships, or world knowledge
+
+CHARACTER NAMING GUIDELINES:
+- Avoid numbered generic names like "villager_1", "wolf_1", "character_2", "merchant_1"
+- Give characters names that feel natural and fit the story context
+- Names should be memorable but not forced or overly elaborate
 
 After using tools to prepare the state, provide your final narrative as a JSON Outcome object with:
 - "narrative": Your story text

@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     model_provider: Literal["openai", "ollama", "generic"] = Field(default="openai")
     openai_api_base: str = Field(default="https://api.openai.com/v1")
     openai_api_key: str = Field(default="")
-    model_name: str = Field(default="gpt-4")
+    model_name: str = Field(default="gpt-5-nano")
 
     # Server Configuration
     host: str = Field(default="0.0.0.0")
