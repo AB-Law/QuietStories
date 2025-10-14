@@ -252,13 +252,12 @@ class BaseProvider(ABC):
             # Use LangChain's astream method for token-by-token streaming
             async for chunk in llm.astream(messages):
                 if hasattr(chunk, "content") and chunk.content:
-                    # Yield each token as it's generated
-                    for token in chunk.content:
-                        yield token
+                    # Yield each chunk as it's generated
+                    yield chunk.content
+
                 elif isinstance(chunk, str):
                     # Handle string responses
-                    for token in chunk:
-                        yield token
+                    yield chunk
 
         except Exception as e:
             logger.error(f"Streaming error: {e}")

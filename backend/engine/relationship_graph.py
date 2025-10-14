@@ -484,14 +484,20 @@ Respond with ONLY the JSON object:"""
             )
 
             import json
-            import re
+
+            def _extract_json_object(s):
+                """Extract the first JSON object from a string using JSONDecoder."""
+                decoder = json.JSONDecoder()
+                s = s.lstrip()
+                try:
+                    obj, idx = decoder.raw_decode(s)
+                    return obj
+                except Exception:
+                    return None
 
             # Look for JSON object in response
-            json_match = re.search(r"\{[^}]+\}", response_content, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(0)
-                analysis = json.loads(json_str)
-
+            analysis = _extract_json_object(response_content)
+            if analysis:
                 # Validate required fields
                 if all(
                     key in analysis

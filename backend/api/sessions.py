@@ -1004,8 +1004,17 @@ async def delete_session(session_id: str):
             temp_search = SemanticMemorySearch(session_id)
             if temp_search.is_available() and temp_search.vectorstore:
                 # Delete the session-specific collection
-                temp_search.vectorstore.delete_collection()
-                logger.info(f"Deleted ChromaDB collection for session {session_id}")
+                try:
+                    temp_search.vectorstore.delete_collection()
+                    logger.info(f"Deleted ChromaDB collection for session {session_id}")
+                except ValueError as ve:
+                    logger.warning(
+                        f"ChromaDB collection for session {session_id} not found: {ve}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to delete ChromaDB collection for session {session_id}: {e}"
+                    )
         except Exception as e:
             logger.warning(
                 f"Failed to delete ChromaDB collection for session {session_id}: {e}"
