@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8000)
     debug: bool = Field(default=False)
+    # Verbose logging settings for debugging
+    verbose_orchestrator: bool = True
+    log_message_sequences: bool = True
+    orchestrator_recursion_limit: int = Field(default=50)
 
     # Monte Carlo Configuration
     monte_carlo_turns: int = Field(default=100)
