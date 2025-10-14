@@ -20,18 +20,21 @@ class LMStudioProvider(BaseProvider):
     """LMStudio provider for local LLM models with OpenAI-compatible API"""
 
     def __init__(
-        self, api_base: str = "http://localhost:5101/v1", api_key: str = "", model_name: str = "local-model"
+        self,
+        api_base: str = "http://localhost:5101/v1",
+        api_key: str = "",
+        model_name: str = "local-model",
     ):
         """
         Initialize LMStudio provider.
-        
+
         Args:
             api_base: LMStudio server URL (default: http://localhost:5101/v1)
             api_key: API key (not required for LMStudio, but kept for compatibility)
             model_name: Name of the loaded model (can be any string for LMStudio)
         """
         super().__init__(api_base, api_key or "lm-studio", model_name)
-        
+
         # LMStudio-specific configuration
         self.llm = ChatOpenAI(
             model=model_name,
@@ -41,7 +44,7 @@ class LMStudioProvider(BaseProvider):
             # LMStudio often has lower token limits for local models
             max_tokens=2048,
         )
-        
+
         self.logger = logging.getLogger(__name__)
 
     async def chat(
@@ -54,50 +57,56 @@ class LMStudioProvider(BaseProvider):
     ) -> Union[ProviderResponse, Any]:
         """
         Send chat request to LMStudio using OpenAI-compatible API.
-        
+
         Args:
             messages: List of messages to send
             tools: Optional list of tools (may not be supported by all local models)
             json_schema: Optional JSON schema for structured output
             stream: Whether to stream the response
             **kwargs: Additional parameters (temperature, max_tokens, etc.)
-            
+
         Returns:
             ProviderResponse with generated content
         """
         try:
             self.logger.debug(f"[LMStudio] Sending request to {self.api_base}")
             self.logger.debug(f"[LMStudio] Model: {self.model_name}")
-            
+
             # Configure LLM with parameters
             llm = self.llm
-            
+
             # Apply custom parameters
             if "temperature" in kwargs:
                 llm = llm.bind(temperature=kwargs["temperature"])
             if "max_tokens" in kwargs:
                 llm = llm.bind(max_tokens=kwargs["max_tokens"])
-            
+
             # Note: Tool calling may not be supported by all local models
             # We'll try to bind tools but gracefully handle if not supported
             if tools:
                 try:
-                    self.logger.debug(f"[LMStudio] Attempting to bind {len(tools)} tools")
+                    self.logger.debug(
+                        f"[LMStudio] Attempting to bind {len(tools)} tools"
+                    )
                     llm = llm.bind_tools(tools)
                 except Exception as e:
                     self.logger.warning(f"[LMStudio] Tool binding not supported: {e}")
                     # Continue without tools
-            
+
             # Handle structured output if requested
             if json_schema is not None:
                 try:
                     self.logger.info("[LMStudio] Using structured output")
                     structured_llm = llm.with_structured_output(json_schema)
                     structured = await structured_llm.ainvoke(messages)
-                    
+
                     # Convert to JSON string
-                    content = json.dumps(structured) if not isinstance(structured, str) else structured
-                    
+                    content = (
+                        json.dumps(structured)
+                        if not isinstance(structured, str)
+                        else structured
+                    )
+
                     return ProviderResponse(
                         content=content,
                         usage=self._estimate_usage(messages, content),
@@ -107,22 +116,22 @@ class LMStudioProvider(BaseProvider):
                 except Exception as e:
                     self.logger.warning(f"[LMStudio] Structured output failed: {e}")
                     # Fall back to regular generation and try to parse JSON
-            
+
             # Handle streaming
             if stream:
                 return self._handle_streaming_response(llm, messages, tools, **kwargs)
-            
+
             # Normal invocation
             self.logger.debug(f"[LMStudio] Invoking with {len(messages)} messages")
             response = await llm.ainvoke(messages)
-            
+
             # Extract content
             content = (
                 response.content if hasattr(response, "content") else str(response)
             )
-            
+
             self.logger.debug(f"[LMStudio] Received {len(content)} characters")
-            
+
             # Extract tool calls if available
             tool_calls = None
             if hasattr(response, "tool_calls") and response.tool_calls:
@@ -138,15 +147,17 @@ class LMStudioProvider(BaseProvider):
                         }
                         for tc in response.tool_calls
                     ]
-                    self.logger.debug(f"[LMStudio] Extracted {len(tool_calls)} tool calls")
+                    self.logger.debug(
+                        f"[LMStudio] Extracted {len(tool_calls)} tool calls"
+                    )
                 except Exception as e:
                     self.logger.warning(f"[LMStudio] Failed to extract tool calls: {e}")
-            
+
             # Get usage metadata if available, otherwise estimate
             usage = getattr(response, "usage_metadata", None)
             if not usage:
                 usage = self._estimate_usage(messages, content)
-            
+
             return ProviderResponse(
                 content=content,
                 usage=usage,
@@ -156,28 +167,43 @@ class LMStudioProvider(BaseProvider):
 
         except Exception as e:
             self.logger.error(f"[LMStudio] Error: {e}")
-            raise Exception(f"LMStudio API error: {e}. Make sure LMStudio is running on {self.api_base}")
+            raise Exception(
+                f"LMStudio API error: {e}. Make sure LMStudio is running on {self.api_base}"
+            )
 
-    def _estimate_usage(self, messages: List[BaseMessage], content: str) -> Dict[str, int]:
+    def _estimate_usage(
+        self, messages: List[BaseMessage], content: str
+    ) -> Dict[str, int]:
         """
         Estimate token usage for local models that don't provide usage stats.
-        
+
         Args:
             messages: Input messages
             content: Generated content
-            
+
         Returns:
             Dictionary with estimated token counts
         """
         # Rough estimation: ~4 characters per token on average
-        prompt_text = " ".join([
-            msg.content if hasattr(msg, "content") else str(msg) 
-            for msg in messages
-        ])
-        
+        prompt_parts: List[str] = []
+        for msg in messages:
+            if hasattr(msg, "content"):
+                msg_content = msg.content
+                if isinstance(msg_content, str):
+                    prompt_parts.append(msg_content)
+                elif isinstance(msg_content, list):
+                    # Handle list content (mixed media)
+                    prompt_parts.append(" ".join(str(item) for item in msg_content))
+                else:
+                    prompt_parts.append(str(msg_content))
+            else:
+                prompt_parts.append(str(msg))
+
+        prompt_text = " ".join(prompt_parts)
+
         prompt_tokens = len(prompt_text) // 4
         completion_tokens = len(content) // 4
-        
+
         return {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
@@ -194,22 +220,21 @@ class LMStudioProvider(BaseProvider):
     async def health_check(self) -> bool:
         """
         Check if LMStudio server is accessible and responding.
-        
+
         Returns:
             True if LMStudio is accessible, False otherwise
         """
         try:
             self.logger.info(f"[LMStudio] Health check to {self.api_base}")
-            
+
             # Simple health check with minimal message
             test_message = HumanMessage(content="Hi")
             response = await self.llm.ainvoke([test_message])
-            
+
             self.logger.info("[LMStudio] Health check passed ✓")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"[LMStudio] Health check failed: {e}")
             self.logger.error(f"Make sure LMStudio is running on {self.api_base}")
             return False
-
