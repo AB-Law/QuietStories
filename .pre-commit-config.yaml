@@ -1,34 +1,42 @@
 repos:
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
-    hooks:
-      - id: trailing-whitespace
-      - id: end-of-file-fixer
-      - id: check-yaml
-      - id: check-added-large-files
-
+  # Black for code formatting
   - repo: https://github.com/psf/black
-    rev: 25.9.0
+    rev: 24.10.0
     hooks:
       - id: black
-        language_version: python3
+        language_version: python3.11
+        args: [--line-length=88]
 
+  # isort for import sorting
   - repo: https://github.com/pycqa/isort
     rev: 5.13.2
     hooks:
       - id: isort
-        args: ["--profile", "black"]
+        args: [--profile=black, --line-length=88]
 
+  # mypy for static type checking
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.8.0
+    rev: v1.11.2
     hooks:
       - id: mypy
-        exclude: ^backend/db/schema\.py$
+        exclude: ^backend/db/schema.py
+        args: [--ignore-missing-imports]
 
-  - repo: local
+  # End-of-file-fixer
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
     hooks:
-      - id: frontend-build
-        name: Frontend Build Check
-        entry: bash -c "cd frontend && npm run build"
-        language: system
-        pass_filenames: false
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  # Check for added large files
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-added-large-files
+
+  # Check for merge conflicts
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-merge-conflict

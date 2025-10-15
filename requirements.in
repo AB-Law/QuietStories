@@ -1,0 +1,36 @@
+# Core FastAPI dependencies
+fastapi
+uvicorn[standard]
+pydantic
+httpx
+python-multipart
+python-dotenv
+sse-starlette
+
+# LangChain for LLM orchestration
+langchain
+langchain-openai
+langchain-community
+langgraph
+
+# Vector database and embeddings
+chromadb
+langchain-chroma
+
+# JSON processing
+jsonschema
+json-logic-qubit
+
+# Database
+sqlalchemy
+
+# Testing
+pytest
+pytest-asyncio
+pytest-cov
+
+# Development tools
+black
+isort
+mypy
+pre-commit
