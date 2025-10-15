@@ -80,6 +80,9 @@ jobs:
     needs: [backend, frontend]
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
     steps:
     - uses: actions/checkout@v4
 
