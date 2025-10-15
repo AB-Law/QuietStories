@@ -30,6 +30,28 @@ A dynamic Choose-Your-Own-Adventure (CYOA) engine that generates interactive sto
 
 ## Architecture
 
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Frontend      │    │   Backend       │    │   LLM APIs      │
+│   (React/Vite)  │◄──►│   (FastAPI)     │◄──►│   (OpenAI/      │
+│                 │    │                 │    │    Ollama/      │
+│   - Chat UI     │    │   - REST API    │    │    LMStudio)    │
+│   - Admin Panel │    │   - Scenario    │    │                 │
+│   - State Mgmt  │    │     Engine      │    │   - Embeddings  │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 │
+                    ┌─────────────────┐
+                    │   Database      │
+                    │   (SQLite)      │
+                    │                 │
+                    │   - Scenarios   │
+                    │   - Sessions    │
+                    │   - Memories    │
+                    └─────────────────┘
+```
+
 The system consists of:
 
 - **Backend** (`backend/`): FastAPI server with scenario generation, compilation, and orchestration
@@ -125,6 +147,51 @@ The system consists of:
    ```
 
    The frontend will be available at `http://localhost:5173`
+
+## Docker Quickstart
+
+For the easiest way to run QuietStories, use Docker Compose:
+
+```bash
+# Clone the repository
+git clone https://github.com/AB-Law/QuietStories.git
+cd QuietStories
+
+# Copy environment configuration
+cp .env.example .env
+# Edit .env with your API keys and settings
+
+# Start all services (API, frontend, and optional logging)
+docker-compose up
+
+# Or start just the API and frontend
+docker-compose --profile full up
+```
+
+The application will be available at:
+- **API**: `http://localhost:8000`
+- **Frontend**: `http://localhost:5173`
+- **API Documentation**: `http://localhost:8000/docs`
+
+### Docker Services
+
+- `api`: FastAPI backend server
+- `web`: React frontend application
+- `chroma`: ChromaDB for semantic memory (optional)
+- `loki`, `grafana`, `promtail`: Logging and monitoring stack (optional)
+
+### Production Deployment
+
+For production deployment, use the provided Docker images:
+
+```bash
+# Pull the latest images
+docker pull ghcr.io/ab-law/quietstories-api:latest
+docker pull ghcr.io/ab-law/quietstories-web:latest
+
+# Run with docker-compose (update the compose file for production settings)
+docker-compose -f docker-compose.prod.yml up
+```
 
 ## API Usage
 
