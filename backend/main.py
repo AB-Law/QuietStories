@@ -19,13 +19,12 @@ from backend.config import settings
 from backend.utils.logger import LogLevel, get_logger, setup_logging
 
 # Initialize logging for Grafana/Loki integration
-# Get log level from environment variable, default to INFO
-log_level_raw = os.getenv("LOG_LEVEL", "INFO").upper()
+log_level_raw = settings.log_level.upper()
 log_level: LogLevel = log_level_raw if log_level_raw in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] else "INFO"  # type: ignore
-log_file = os.getenv("LOG_FILE")  # Optional log file
+log_file = settings.log_file
 
 # Configure for centralized logging (disable console spam in production)
-enable_console_logging = os.getenv("ENABLE_CONSOLE_LOGS", "true").lower() == "true"
+enable_console_logging = settings.enable_console_logs
 enable_colors = enable_console_logging  # Only colorize if console logging is enabled
 
 setup_logging(
@@ -54,9 +53,16 @@ logger.info(f"Model provider: {settings.model_provider}")
 logger.info(f"Model name: {settings.model_name}")
 
 # Add CORS middleware
+# Parse allowed origins from environment variable
+allowed_origins = [
+    origin.strip()
+    for origin in settings.cors_allow_origins.split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

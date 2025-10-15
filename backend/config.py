@@ -64,6 +64,26 @@ class Settings(BaseSettings):
         description="SQLite database file path for storing scenarios and sessions",
     )
 
+    # CORS Configuration
+    cors_allow_origins: str = Field(
+        default="http://localhost:5173,http://localhost:3000",
+        description="Comma-separated list of allowed origins for CORS",
+    )
+
+    # Logging Configuration
+    log_level: str = Field(
+        default="INFO",
+        description="Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
+    )
+    log_file: Optional[str] = Field(
+        default=None,
+        description="Path to log file (optional)",
+    )
+    enable_console_logs: bool = Field(
+        default=True,
+        description="Enable console logging (set to false in production)",
+    )
+
     class Config:
         env_file = ".env"
         case_sensitive = False
