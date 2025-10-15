@@ -6,6 +6,7 @@ repos:
       - id: black
         language_version: python3.11
         args: [--line-length=88]
+        files: ^backend/
 
   # isort for import sorting
   - repo: https://github.com/pycqa/isort
@@ -13,6 +14,7 @@ repos:
     hooks:
       - id: isort
         args: [--profile=black, --line-length=88]
+        files: ^backend/
 
   # mypy for static type checking
   - repo: https://github.com/pre-commit/mirrors-mypy
@@ -21,6 +23,7 @@ repos:
       - id: mypy
         exclude: ^backend/db/schema.py
         args: [--ignore-missing-imports]
+        files: ^backend/
 
   # End-of-file-fixer
   - repo: https://github.com/pre-commit/pre-commit-hooks

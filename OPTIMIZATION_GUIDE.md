@@ -313,7 +313,7 @@ curl -X POST http://localhost:8000/optimization/presets/local_llm
    ```python
    # Check token estimates in logs
    LOG_LEVEL=DEBUG python -m uvicorn backend.main:app --reload
-   
+
    # Look for lines like:
    # [Optimizer] Current estimated tokens: 3500
    # [Optimizer] Reduced from 20 to 15 messages (3500 -> 2200 tokens)
@@ -495,11 +495,11 @@ curl -X POST http://localhost:8000/optimization/config \
 
 QuietStories now provides:
 
-✅ **LMStudio Support** - Run stories with local models  
-✅ **Smart Optimization** - Automatic token reduction  
-✅ **Memory Consolidation** - Prevents context bloat  
-✅ **Flexible Configuration** - Presets + custom settings  
-✅ **Performance Monitoring** - Track optimization metrics  
+✅ **LMStudio Support** - Run stories with local models
+✅ **Smart Optimization** - Automatic token reduction
+✅ **Memory Consolidation** - Prevents context bloat
+✅ **Flexible Configuration** - Presets + custom settings
+✅ **Performance Monitoring** - Track optimization metrics
 
 **Recommended setup for most users:**
 
@@ -512,4 +512,3 @@ curl -X POST http://localhost:8000/optimization/presets/local_llm
 ```
 
 Enjoy faster, more efficient story generation! 🚀
-
