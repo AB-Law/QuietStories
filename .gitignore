@@ -136,6 +136,7 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
 .envrc
 .venv
 env/
@@ -318,6 +319,12 @@ temp/
 *.db
 *.sqlite
 *.sqlite3
+
+# Project-specific data and artifacts
+data/
+logs/
+*.bin
+frontend/dist/
 
 # Logs
 logs

@@ -1,5 +1,7 @@
 # QuietStories
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A dynamic Choose-Your-Own-Adventure (CYOA) engine that generates interactive stories using AI. The engine accepts free-text scenario descriptions and automatically creates structured rules, working with both local and remote LLMs through a unified provider interface.
 
 ## Features
@@ -66,7 +68,7 @@ The system consists of:
    pip install -r requirements.txt
 
    # Copy environment template
-   cp random/env.example .env
+   cp .env.example .env
 
    # Edit .env with your API keys and settings
    nano .env
