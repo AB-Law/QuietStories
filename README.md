@@ -157,10 +157,6 @@ For the easiest way to run QuietStories, use Docker Compose:
 git clone https://github.com/AB-Law/QuietStories.git
 cd QuietStories
 
-# Copy environment configuration
-cp .env.example .env
-# Edit .env with your API keys and settings
-
 # Start all services (API, frontend, and optional logging)
 docker-compose up
 
@@ -172,6 +168,26 @@ The application will be available at:
 - **API**: `http://localhost:8000`
 - **Frontend**: `http://localhost:5173`
 - **API Documentation**: `http://localhost:8000/docs`
+
+### Using LM Studio or Ollama with Docker
+
+When running QuietStories in Docker with LM Studio or Ollama on your host machine:
+
+**For LM Studio:**
+1. **Start LM Studio** on your host (not in Docker) with the local server running on port 1234
+2. **Run Docker Compose** - the configuration is already set up to connect to your host's LM Studio
+3. **No additional configuration needed** - `docker-compose.yml` automatically uses `host.docker.internal:1234`
+
+**For Ollama:**
+1. **Start Ollama** on your host (not in Docker) - default port is 11434
+2. **Set environment variable**: Create a `.env` file with:
+   ```bash
+   MODEL_PROVIDER=ollama
+   OPENAI_API_BASE=http://host.docker.internal:11434/v1
+   ```
+3. **Run Docker Compose** with your environment file
+
+See [LMSTUDIO_SETUP.md](./LMSTUDIO_SETUP.md) for detailed LM Studio setup instructions.
 
 ### Docker Services
 
