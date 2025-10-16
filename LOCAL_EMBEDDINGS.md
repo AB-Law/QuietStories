@@ -65,7 +65,7 @@ LM Studio supports OpenAI-compatible embedding endpoints.
 
 **For detailed setup instructions, see:** [LMSTUDIO_SETUP.md](./LMSTUDIO_SETUP.md)
 
-**Configure:**
+**Configure (Non-Docker):**
 ```bash
 MODEL_PROVIDER=lmstudio
 LMSTUDIO_API_BASE=http://localhost:1234/v1
@@ -78,7 +78,21 @@ EMBEDDING_MODEL_NAME=local-embedding-model
 EMBEDDING_API_BASE=http://localhost:1234/v1
 ```
 
-**Note:** The `LMSTUDIO_API_BASE` variable is specifically for LM Studio and takes precedence over `OPENAI_API_BASE` when using `MODEL_PROVIDER=lmstudio`.
+**Configure (Docker):**
+```bash
+# When running in Docker, use host.docker.internal
+MODEL_PROVIDER=lmstudio
+LMSTUDIO_API_BASE=http://host.docker.internal:1234/v1
+OPENAI_API_BASE=http://host.docker.internal:1234/v1
+MODEL_NAME=your-chat-model
+
+# Embeddings (uses same LM Studio instance)
+EMBEDDING_PROVIDER=lmstudio
+EMBEDDING_MODEL_NAME=local-embedding-model
+EMBEDDING_API_BASE=http://host.docker.internal:1234/v1
+```
+
+**Note:** The `LMSTUDIO_API_BASE` variable is specifically for LM Studio and takes precedence over `OPENAI_API_BASE` when using `MODEL_PROVIDER=lmstudio`. When using Docker Compose, these settings are already configured in `docker-compose.yml`.
 
 ### 3. OpenAI Embeddings (Cloud)
 

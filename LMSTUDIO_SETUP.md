@@ -213,17 +213,34 @@ MONTE_CARLO_TURNS=100
 NEGATIVITY_MIN_FAIL_RATE=0.25
 ```
 
-### Step 2: Custom Port Configuration
+### Step 2: Docker Configuration
+
+If you're running QuietStories in Docker, you need to use `host.docker.internal` instead of `localhost` to connect to LM Studio running on your host machine:
+
+```bash
+# For Docker deployments (the docker-compose.yml sets these by default)
+LMSTUDIO_API_BASE=http://host.docker.internal:1234/v1
+OPENAI_API_BASE=http://host.docker.internal:1234/v1
+EMBEDDING_API_BASE=http://host.docker.internal:1234/v1
+```
+
+**Note**: The provided `docker-compose.yml` already includes these settings, so you typically don't need to set them manually when using Docker Compose.
+
+### Step 3: Custom Port Configuration
 
 If you changed LM Studio's default port (1234) to something else:
 
 ```bash
-# If LM Studio is running on port 5101 instead
+# If LM Studio is running on port 5101 instead (non-Docker)
 LMSTUDIO_API_BASE=http://localhost:5101/v1
 OPENAI_API_BASE=http://localhost:5101/v1
+
+# If LM Studio is running on port 5101 instead (Docker)
+LMSTUDIO_API_BASE=http://host.docker.internal:5101/v1
+OPENAI_API_BASE=http://host.docker.internal:5101/v1
 ```
 
-### Step 3: Install Dependencies
+### Step 4: Install Dependencies
 
 ```bash
 # Install Python dependencies
@@ -233,7 +250,7 @@ pip install -r requirements.txt
 pip install chromadb langchain-chroma langchain-community
 ```
 
-### Step 4: Start QuietStories
+### Step 5: Start QuietStories
 
 ```bash
 # Start the backend
@@ -551,6 +568,8 @@ Temperature: 0.5-0.6
 
 Here's a complete example for a 16GB RAM system:
 
+### Non-Docker Setup
+
 ### 1. Download and Install LM Studio
 ```bash
 # Download from lmstudio.ai
@@ -616,6 +635,37 @@ npm run dev
 Navigate to: http://localhost:5173
 Start creating stories!
 ```
+
+### Docker Setup
+
+When running QuietStories in Docker, the configuration is even simpler:
+
+### 1. Install and Start LM Studio on Host Machine
+```bash
+# Download from lmstudio.ai
+# Install and launch
+# Download a model (e.g., Llama 3.2 3B)
+# Load the model and start the Local Server on port 1234
+```
+
+### 2. Start QuietStories with Docker Compose
+```bash
+# No .env file needed - docker-compose.yml handles the configuration
+docker-compose --profile full up
+
+# Or start just the backend
+docker-compose --profile api-only up
+```
+
+The `docker-compose.yml` is already configured to use `host.docker.internal:1234` to connect to LM Studio running on your host machine. No additional configuration needed!
+
+### 3. Access the Application
+```
+API: http://localhost:8000
+Frontend: http://localhost:5173 (if using --profile full)
+```
+
+**Note**: On Linux, `host.docker.internal` is automatically mapped to the host gateway in the docker-compose.yml file, so it works across all platforms (Windows, macOS, and Linux).
 
 ## Next Steps
 

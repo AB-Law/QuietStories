@@ -7,6 +7,15 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_PATH=/app/data/quietstories.db
+      # LMStudio configuration for Docker
+      # When running in Docker, use host.docker.internal to access services on the host machine
+      - LMSTUDIO_API_BASE=http://host.docker.internal:1234/v1
+      - OPENAI_API_BASE=http://host.docker.internal:1234/v1
+      # Embedding configuration for Docker
+      - EMBEDDING_API_BASE=http://host.docker.internal:1234/v1
+    extra_hosts:
+      # Enable host.docker.internal on Linux
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./data:/app/data
     depends_on:
