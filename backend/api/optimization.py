@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from backend.utils.debug import get_performance_metrics
 from backend.utils.logger import get_logger
 from backend.utils.optimization import configure_optimizer, get_optimizer
 
@@ -240,4 +241,54 @@ async def apply_optimization_preset(preset_name: str) -> Dict[str, Any]:
         "preset": preset_name,
         "description": preset["description"],
         "config": {k: v for k, v in preset.items() if k != "description"},
+    }
+
+
+@router.get("/performance/metrics")
+async def get_performance_metrics_endpoint() -> Dict[str, Any]:
+    """
+    Get comprehensive performance metrics for LLM calls and tool execution.
+
+    This endpoint provides insights into:
+    - LLM call latencies and patterns
+    - Tool execution times
+    - Turn processing durations
+    - Performance bottlenecks
+
+    Returns:
+        Performance metrics summary with statistics
+    """
+    logger.debug("Retrieving performance metrics")
+
+    metrics = get_performance_metrics()
+    summary = metrics.get_summary()
+
+    return {
+        "status": "success",
+        "metrics": summary,
+        "description": "Performance metrics for LLM calls, tool executions, and turn processing",
+    }
+
+
+@router.post("/performance/reset")
+async def reset_performance_metrics() -> Dict[str, str]:
+    """
+    Reset all performance metrics.
+
+    Useful for starting fresh measurements after configuration changes
+    or to analyze specific scenarios.
+
+    Returns:
+        Success message
+    """
+    logger.info("Resetting performance metrics")
+
+    metrics = get_performance_metrics()
+    metrics.reset()
+
+    logger.info("✓ Performance metrics reset")
+
+    return {
+        "status": "success",
+        "message": "Performance metrics have been reset",
     }

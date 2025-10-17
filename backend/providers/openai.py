@@ -19,12 +19,18 @@ class OpenAIProvider(BaseProvider):
 
     def __init__(self, api_base: str, api_key: str, model_name: str):
         super().__init__(api_base, api_key, model_name)
-        self.llm = ChatOpenAI(
-            model=model_name,
-            base_url=api_base,
-            api_key=api_key,  # type: ignore
-            temperature=0.7,
-        )
+
+        # gpt-5 models don't support temperature parameter - only support default (1)
+        init_params: Dict[str, Any] = {
+            "model": model_name,
+            "base_url": api_base,
+            "api_key": api_key,  # type: ignore
+        }
+
+        if not model_name.startswith("gpt-5"):
+            init_params["temperature"] = 0.7
+
+        self.llm = ChatOpenAI(**init_params)
 
     async def chat(
         self,
@@ -43,8 +49,12 @@ class OpenAIProvider(BaseProvider):
         try:
             # Configure LLM with parameters
             llm = self.llm
-            if "temperature" in kwargs:
-                llm = llm.bind(temperature=kwargs["temperature"])
+
+            # gpt-5 models don't support temperature parameter - only support default (1)
+            if not self.model_name.startswith("gpt-5"):
+                if "temperature" in kwargs:
+                    llm = llm.bind(temperature=kwargs["temperature"])
+
             if "max_tokens" in kwargs:
                 llm = llm.bind(max_tokens=kwargs["max_tokens"])
 

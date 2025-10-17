@@ -53,6 +53,16 @@ class Settings(BaseSettings):
     verbose_orchestrator: bool = True
     log_message_sequences: bool = True
     orchestrator_recursion_limit: int = Field(default=50)
+    
+    # Performance optimization settings
+    enable_performance_tracking: bool = Field(
+        default=True,
+        description="Enable detailed performance tracking and metrics collection",
+    )
+    max_parallel_tool_calls: int = Field(
+        default=10,
+        description="Maximum number of tool calls to execute in parallel (ToolNode handles this automatically)",
+    )
 
     # Monte Carlo Configuration
     monte_carlo_turns: int = Field(default=100)
