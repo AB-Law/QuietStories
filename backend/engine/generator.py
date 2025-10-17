@@ -34,17 +34,20 @@ class ScenarioGenerator:
             HumanMessage(content=user_prompt),
         ]
 
-        # Check if we're using a local LLM provider
-        # Structured output with json_schema is VERY slow for local LLMs with complex schemas
+        # Check if we're using OpenAI
+        # Structured output with function_calling is ONLY for OpenAI
+        # Local LLMs (lmstudio, ollama) and generic providers are much faster with direct JSON parsing
         from backend.config import settings
 
-        use_structured_output = settings.model_provider not in ["lmstudio", "ollama"]
+        use_structured_output = settings.model_provider == "openai"
 
         if use_structured_output:
-            logger.info("Using structured output (json_schema) for scenario generation")
+            logger.info(
+                "Using structured output (function_calling) for OpenAI scenario generation"
+            )
         else:
             logger.info(
-                f"Provider '{settings.model_provider}' detected - using optimized JSON parsing (faster for local LLMs)"
+                f"Provider '{settings.model_provider}' detected - using optimized JSON parsing (faster)"
             )
 
         try:
@@ -53,11 +56,14 @@ class ScenarioGenerator:
                 # Ref: https://lmstudio.ai/docs/app/api/structured-output
                 llm = self.provider.llm
 
-                # Use json_schema method (compatible with both OpenAI and LM Studio)
-                structured_llm = llm.with_structured_output(
-                    ScenarioSpec, method="json_schema"
+                # Use function_calling for OpenAI (more reliable), json_schema for others
+                method = (
+                    "function_calling"
+                    if settings.model_provider == "openai"
+                    else "json_schema"
                 )
-                logger.info("Invoking LLM with structured output (json_schema)...")
+                structured_llm = llm.with_structured_output(ScenarioSpec, method=method)
+                logger.info(f"Invoking LLM with structured output ({method})...")
                 scenario_spec = await structured_llm.ainvoke(messages)
 
                 logger.info(f"Successfully generated scenario: {scenario_spec.name}")
