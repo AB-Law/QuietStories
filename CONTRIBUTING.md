@@ -12,19 +12,32 @@ We love your input! We want to make contributing to this project as easy and tra
 
 We use GitHub to host code, to track issues and feature requests, as well as accept pull requests.
 
-1. Fork the repo and create your branch from `main`
-2. If you've added code that should be tested, add tests
-3. If you've changed APIs, update the documentation
-4. Ensure the test suite passes
-5. Make sure your code lints
-6. Issue that pull request!
+QuietStories uses a **two-branch workflow**:
+- **`main` branch**: Stable, production-ready code
+- **`dev` branch**: Active development and integration branch
+
+**Contribution Workflow:**
+
+1. Fork the repo and create your branch from **`dev`** (not `main`)
+2. Name your branch with a prefix: `feature/name`, `bugfix/name`, or `chore/name`
+3. If you've added code that should be tested, add tests
+4. If you've changed APIs, update the documentation
+5. Ensure the test suite passes
+6. Make sure your code lints (pre-commit hooks will help)
+7. Create a pull request to merge into **`dev`**
+
+For more details on our branching strategy and release process, see [RELEASE.md](./RELEASE.md).
 
 ## Pull Request Process
 
-1. Update the README with details of changes to the interface, if applicable
-2. Update the version numbers in any examples files and the README to the new version that this Pull Request would represent
+1. Create your feature branch from `dev` (not `main`)
+2. Update the README with details of changes to the interface, if applicable
 3. Follow the existing coding style (see below)
-4. The PR will be merged once you have the sign-off of at least one maintainer
+4. Ensure all tests pass and code quality checks pass
+5. Create a pull request targeting the **`dev`** branch
+6. The PR will be merged once you have the sign-off of at least one maintainer
+
+**Note:** Only maintainers merge from `dev` to `main` during releases.
 
 ## Code Style
 
