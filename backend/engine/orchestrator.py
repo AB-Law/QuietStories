@@ -28,11 +28,30 @@ from backend.prompts import NARRATOR_SYSTEM, NARRATOR_USER
 from backend.providers import create_provider
 from backend.schemas import Outcome, ScenarioSpec
 from backend.schemas.outcome import RollRequest
+from backend.utils.debug import get_performance_metrics, time_it
 from backend.utils.jsonlogic import JSONLogicEvaluator
 from backend.utils.logger import get_logger
 from backend.utils.optimization import ContextOptimizer, get_optimizer
 
 logger = get_logger(__name__)
+performance_metrics = get_performance_metrics()
+
+# Categorize tools by read/write characteristics for optimization
+READ_ONLY_TOOLS = {
+    "read_state",
+    "search_memories",
+    "query_relationships",
+    "semantic_search",
+    "stateful_read",
+}
+
+WRITE_TOOLS = {
+    "add_memory",
+    "update_state",
+    "update_world",
+    "create_character",
+    "batch_memory",
+}
 
 
 def _get_message_content_as_string(message: BaseMessage) -> str:
@@ -752,6 +771,11 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
         Returns:
             Updated state with new message
         """
+        import uuid
+
+        call_id = str(uuid.uuid4())[:8]
+        performance_metrics.start_operation(f"agent_call_{call_id}", "llm_call")
+
         logger.debug("[Agent] Calling LLM for decision making")
         self._verbose_log("Entering _call_agent")
 
@@ -853,6 +877,17 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
             "game_state": self.spec.state,  # Keep state synchronized
             "entities": self.spec.entities,
         }
+
+        # End performance tracking
+        performance_metrics.end_operation(
+            f"agent_call_{call_id}",
+            "llm_call",
+            metadata={
+                "has_tool_calls": bool(formatted_tool_calls),
+                "tool_count": len(formatted_tool_calls) if formatted_tool_calls else 0,
+                "message_count": len(optimized_messages),
+            },
+        )
 
         self._verbose_log("Exiting _call_agent successfully")
         return result
@@ -973,7 +1008,13 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
         """
         Execute tool calls with detailed logging and proper error handling.
         """
+        import time as time_module
+        import uuid
+
         try:
+            execution_id = str(uuid.uuid4())[:8]
+            execution_start = time_module.time()
+
             logger.info("[Tools] Starting tool execution")
             self._verbose_log("Entering _call_tools_with_logging")
 
@@ -990,12 +1031,24 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
                 f"[Tools] Has tool_calls attribute: {hasattr(last_message, 'tool_calls')}"
             )
 
-            # Extract tool call IDs for proper error handling
+            # Extract tool call IDs and categorize tools for optimization
             tool_call_ids = []
+            read_only_count = 0
+            write_count = 0
+
             if hasattr(last_message, "tool_calls") and last_message.tool_calls:
                 tool_call_ids = [tc["id"] for tc in last_message.tool_calls]
+
+                # Categorize tools
+                for tc in last_message.tool_calls:
+                    tool_name = tc.get("name", "unknown")
+                    if tool_name in READ_ONLY_TOOLS:
+                        read_only_count += 1
+                    elif tool_name in WRITE_TOOLS:
+                        write_count += 1
+
                 logger.debug(
-                    f"[Tools] Tool calls: {len(tool_call_ids)} calls with IDs: {tool_call_ids}"
+                    f"[Tools] Executing {len(tool_call_ids)} tools: {read_only_count} read-only, {write_count} write tools"
                 )
                 self._verbose_log(
                     f"About to execute {len(tool_call_ids)} tools: {tool_call_ids}"
@@ -1023,6 +1076,29 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
                 self._log_message_sequence(
                     result["messages"], "Tool execution - result messages"
                 )
+
+            # Track tool execution performance with detailed metrics
+            execution_time = time_module.time() - execution_start
+            execution_time_ms = execution_time * 1000
+
+            # Calculate average time per tool
+            avg_time_per_tool = (
+                execution_time_ms / len(tool_call_ids) if tool_call_ids else 0
+            )
+
+            logger.info(
+                f"[Tools] Executed {len(tool_call_ids)} tools in {execution_time:.3f}s (avg: {avg_time_per_tool:.1f}ms/tool)",
+                extra={
+                    "component": "Performance",
+                    "execution_id": execution_id,
+                    "tool_count": len(tool_call_ids),
+                    "read_only_count": read_only_count,
+                    "write_count": write_count,
+                    "duration_ms": execution_time_ms,
+                    "avg_time_per_tool_ms": avg_time_per_tool,
+                    "tool_ids": tool_call_ids,
+                },
+            )
 
             return result
 
@@ -1315,6 +1391,7 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
             ),
         }
 
+    @time_it
     async def process_turn(self, user_input: Optional[str] = None) -> Outcome:
         """
         Process a single turn using Langgraph StateGraph.
@@ -1328,6 +1405,9 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
         Returns:
             Outcome object containing narrative and state changes
         """
+        turn_id = f"turn_{self.session_id}_{self.memory.get_turn_count() + 1}"
+        performance_metrics.start_operation(turn_id, "turn_processing")
+
         logger.info(
             f"[Orchestrator] Processing turn {self.memory.get_turn_count() + 1} with Langgraph StateGraph"
         )
@@ -1538,6 +1618,24 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
 
         # Save memory to database
         self.memory.save_to_database()
+
+        # End performance tracking
+        performance_metrics.end_operation(
+            turn_id,
+            "turn_processing",
+            metadata={
+                "turn_number": self.memory.get_turn_count(),
+                "user_input": user_input is not None,
+                "state_changes": (
+                    len(outcome.state_changes) if outcome.state_changes else 0
+                ),
+                "memory_updates": (
+                    len(outcome.hidden_memory_updates)
+                    if outcome.hidden_memory_updates
+                    else 0
+                ),
+            },
+        )
 
         return outcome
 
