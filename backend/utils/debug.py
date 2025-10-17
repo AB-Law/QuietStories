@@ -28,11 +28,144 @@ import json
 import sys
 import time
 import traceback
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, Optional
 
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+class PerformanceMetrics:
+    """
+    Track and aggregate performance metrics for LLM calls and tool execution.
+
+    Provides insights into timing, tool usage, and potential bottlenecks.
+    """
+
+    def __init__(self):
+        """Initialize performance metrics tracker."""
+        self.metrics: Dict[str, Any] = {
+            "llm_calls": [],
+            "tool_executions": [],
+            "turn_processing": [],
+        }
+        self.start_times: Dict[str, float] = {}
+
+    def start_operation(self, operation_id: str, operation_type: str):
+        """
+        Start timing an operation.
+
+        Args:
+            operation_id: Unique identifier for this operation
+            operation_type: Type of operation (llm_call, tool_execution, turn_processing)
+        """
+        self.start_times[operation_id] = time.time()
+        logger.debug(
+            f"[Metrics] Started {operation_type}: {operation_id}",
+            extra={"component": "Metrics", "operation_id": operation_id},
+        )
+
+    def end_operation(
+        self,
+        operation_id: str,
+        operation_type: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        """
+        End timing an operation and record metrics.
+
+        Args:
+            operation_id: Unique identifier for this operation
+            operation_type: Type of operation
+            metadata: Additional metadata to record
+        """
+        if operation_id not in self.start_times:
+            logger.warning(f"[Metrics] No start time for operation: {operation_id}")
+            return
+
+        start_time = self.start_times.pop(operation_id)
+        duration = time.time() - start_time
+        duration_ms = duration * 1000
+
+        metric_entry = {
+            "operation_id": operation_id,
+            "operation_type": operation_type,
+            "duration_ms": duration_ms,
+            "duration_s": duration,
+            "timestamp": time.time(),
+            "metadata": metadata or {},
+        }
+
+        # Store in appropriate category
+        if operation_type == "llm_call":
+            self.metrics["llm_calls"].append(metric_entry)
+        elif operation_type == "tool_execution":
+            self.metrics["tool_executions"].append(metric_entry)
+        elif operation_type == "turn_processing":
+            self.metrics["turn_processing"].append(metric_entry)
+
+        logger.info(
+            f"[Metrics] Completed {operation_type} in {duration:.3f}s",
+            extra={
+                "component": "Metrics",
+                "operation_id": operation_id,
+                "operation_type": operation_type,
+                "duration_ms": duration_ms,
+                "metadata": metadata,
+            },
+        )
+
+    def get_summary(self) -> Dict[str, Any]:
+        """
+        Get summary statistics for all tracked operations.
+
+        Returns:
+            Dictionary with summary statistics
+        """
+        summary = {}
+
+        for category in ["llm_calls", "tool_executions", "turn_processing"]:
+            entries = self.metrics[category]
+            if not entries:
+                summary[category] = {
+                    "count": 0,
+                    "total_time_ms": 0,
+                    "avg_time_ms": 0,
+                    "min_time_ms": 0,
+                    "max_time_ms": 0,
+                }
+                continue
+
+            durations = [e["duration_ms"] for e in entries]
+            summary[category] = {
+                "count": len(entries),
+                "total_time_ms": sum(durations),
+                "avg_time_ms": sum(durations) / len(durations),
+                "min_time_ms": min(durations),
+                "max_time_ms": max(durations),
+                "recent_operations": entries[-5:],  # Last 5 operations
+            }
+
+        return summary
+
+    def reset(self):
+        """Reset all metrics."""
+        self.metrics = {
+            "llm_calls": [],
+            "tool_executions": [],
+            "turn_processing": [],
+        }
+        self.start_times.clear()
+        logger.info("[Metrics] Reset all performance metrics")
+
+
+# Global performance metrics instance
+_global_metrics = PerformanceMetrics()
+
+
+def get_performance_metrics() -> PerformanceMetrics:
+    """Get the global performance metrics instance."""
+    return _global_metrics
 
 
 def debug_point(condition: bool = True, message: str = "Debug breakpoint"):
@@ -115,7 +248,7 @@ def debug_state(state: dict, message: str = "Current State"):
 
 def time_it(func: Callable) -> Callable:
     """
-    Decorator to time function execution
+    Decorator to time function execution with detailed performance metrics
 
     Example:
         @time_it
@@ -124,7 +257,7 @@ def time_it(func: Callable) -> Callable:
             return "done"
 
         result = slow_function()
-        # Logs: "slow_function took 1.00 seconds"
+        # Logs: "slow_function took 1.00 seconds" with structured metrics
     """
 
     @functools.wraps(func)
@@ -133,11 +266,32 @@ def time_it(func: Callable) -> Callable:
         try:
             result = await func(*args, **kwargs)
             elapsed = time.time() - start
-            logger.info(f"⏱️  {func.__name__} took {elapsed:.2f} seconds")
+            elapsed_ms = elapsed * 1000
+            logger.info(
+                f"⏱️  {func.__name__} completed in {elapsed:.3f}s",
+                extra={
+                    "component": "Performance",
+                    "function": func.__name__,
+                    "duration_ms": elapsed_ms,
+                    "duration_s": elapsed,
+                    "status": "success",
+                },
+            )
             return result
         except Exception as e:
             elapsed = time.time() - start
-            logger.error(f"⏱️  {func.__name__} failed after {elapsed:.2f} seconds: {e}")
+            elapsed_ms = elapsed * 1000
+            logger.error(
+                f"⏱️  {func.__name__} failed after {elapsed:.3f}s: {e}",
+                extra={
+                    "component": "Performance",
+                    "function": func.__name__,
+                    "duration_ms": elapsed_ms,
+                    "duration_s": elapsed,
+                    "status": "error",
+                    "error": str(e),
+                },
+            )
             raise
 
     @functools.wraps(func)
@@ -146,11 +300,32 @@ def time_it(func: Callable) -> Callable:
         try:
             result = func(*args, **kwargs)
             elapsed = time.time() - start
-            logger.info(f"⏱️  {func.__name__} took {elapsed:.2f} seconds")
+            elapsed_ms = elapsed * 1000
+            logger.info(
+                f"⏱️  {func.__name__} completed in {elapsed:.3f}s",
+                extra={
+                    "component": "Performance",
+                    "function": func.__name__,
+                    "duration_ms": elapsed_ms,
+                    "duration_s": elapsed,
+                    "status": "success",
+                },
+            )
             return result
         except Exception as e:
             elapsed = time.time() - start
-            logger.error(f"⏱️  {func.__name__} failed after {elapsed:.2f} seconds: {e}")
+            elapsed_ms = elapsed * 1000
+            logger.error(
+                f"⏱️  {func.__name__} failed after {elapsed:.3f}s: {e}",
+                extra={
+                    "component": "Performance",
+                    "function": func.__name__,
+                    "duration_ms": elapsed_ms,
+                    "duration_s": elapsed,
+                    "status": "error",
+                    "error": str(e),
+                },
+            )
             raise
 
     # Return appropriate wrapper based on whether function is async
