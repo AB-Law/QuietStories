@@ -22,7 +22,9 @@ A dynamic Choose-Your-Own-Adventure (CYOA) engine that generates interactive sto
 
 ## 📚 Documentation
 
-- **[Performance Guide](./PERFORMANCE.md)** - **NEW!** Monitor and optimize LLM call performance
+- **[QuickStart Guide](./QUICKSTART.md)** - **NEW!** Get started in minutes
+- **[Release & Deployment Guide](./RELEASE.md)** - **NEW!** Release process, branching strategy, and deployment
+- **[Performance Guide](./PERFORMANCE.md)** - Monitor and optimize LLM call performance
 - **[LM Studio Setup Guide](./LMSTUDIO_SETUP.md)** - Complete guide for running QuietStories with LM Studio locally
 - **[Local Embeddings Guide](./LOCAL_EMBEDDINGS.md)** - Set up local embeddings for semantic memory search
 - **[Optimization Guide](./OPTIMIZATION_GUIDE.md)** - Performance tips and local LLM configuration
@@ -199,16 +201,38 @@ See [LMSTUDIO_SETUP.md](./LMSTUDIO_SETUP.md) for detailed LM Studio setup instru
 
 ### Production Deployment
 
-For production deployment, use the provided Docker images:
+For production deployment, use the provided Docker images and deployment script:
 
 ```bash
-# Pull the latest images
-docker pull ghcr.io/ab-law/quietstories-api:latest
-docker pull ghcr.io/ab-law/quietstories-web:latest
+# Quick deployment with the deployment script
+./scripts/deploy.sh
 
-# Run with docker-compose (update the compose file for production settings)
-docker-compose -f docker-compose.prod.yml up
+# Or manually with docker-compose
+docker-compose -f docker-compose.prod.yml up -d
 ```
+
+The deployment script provides easy options:
+```bash
+# Deploy with latest stable version (from main branch)
+./scripts/deploy.sh
+
+# Deploy with dev version (from dev branch)
+./scripts/deploy.sh --tag dev
+
+# Deploy with specific version
+./scripts/deploy.sh --tag v1.0.0
+
+# Pull latest images and show logs
+./scripts/deploy.sh --pull --logs
+```
+
+Services will be available at:
+- **Frontend**: http://localhost (port 80)
+- **API**: http://localhost:8000
+- **API Docs**: http://localhost:8000/docs
+- **ChromaDB**: http://localhost:8001
+
+For complete deployment and release documentation, see **[RELEASE.md](./RELEASE.md)**.
 
 ## API Usage
 
@@ -274,6 +298,25 @@ python random/api_test.py workflow "test" --log-level DEBUG
 ```
 
 ## Development
+
+### Branching Strategy
+
+QuietStories uses a **two-branch workflow** for stable releases and ongoing development:
+
+- **`main` branch**: Production-ready stable releases. All code is thoroughly tested.
+- **`dev` branch**: Integration branch for active development. New features merge here first.
+- **Feature branches**: Created from `dev` with naming convention: `feature/name`, `bugfix/name`, or `chore/name`
+
+**Development Flow:**
+```
+feature/new-feature → dev → main (tagged as v1.x.x)
+```
+
+Docker images are automatically built for both branches:
+- `ghcr.io/ab-law/quietstories-api:latest` (from main)
+- `ghcr.io/ab-law/quietstories-api:dev` (from dev)
+
+For detailed information on releases, versioning, and deployment, see **[RELEASE.md](./RELEASE.md)**.
 
 ### Project Structure
 

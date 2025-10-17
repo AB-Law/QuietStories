@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  api:
+    image: ghcr.io/ab-law/quietstories-api:latest
+    container_name: quietstories-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_PATH=/app/data/quietstories.db
+      # LMStudio/Ollama configuration for Docker
+      # When running in Docker, use host.docker.internal to access services on the host machine
+      # For LMStudio: default port is 1234
+      # For Ollama: default port is 11434
+      # Override these in a .env file if needed
+      - LMSTUDIO_API_BASE=http://host.docker.internal:1234/v1
+      - OPENAI_API_BASE=http://host.docker.internal:1234/v1
+      # Embedding configuration for Docker
+      - EMBEDDING_API_BASE=http://host.docker.internal:1234/v1
+      # For cloud deployments, set these in your .env file:
+      # - MODEL_PROVIDER=openai
+      # - OPENAI_API_KEY=your_api_key_here
+      # - MODEL_NAME=gpt-4o-mini
+      # Logging
+      - LOG_LEVEL=INFO
+      - ENABLE_CONSOLE_LOGS=false
+    extra_hosts:
+      # Enable host.docker.internal on Linux
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      - chroma
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  web:
+    image: ghcr.io/ab-law/quietstories-web:latest
+    container_name: quietstories-web
+    ports:
+      - "80:80"
+    environment:
+      # API URL should point to where the API is accessible from the browser
+      # For local deployment, use http://localhost:8000
+      # For production, use your domain (e.g., https://api.yourdomain.com)
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      - api
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  # ChromaDB for semantic memory search
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: quietstories-chroma
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma-data:/chroma/chroma
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  chroma-data:
+    driver: local
+
+networks:
+  default:
+    name: quietstories-network
