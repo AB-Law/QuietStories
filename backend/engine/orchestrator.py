@@ -36,6 +36,23 @@ from backend.utils.optimization import ContextOptimizer, get_optimizer
 logger = get_logger(__name__)
 performance_metrics = get_performance_metrics()
 
+# Categorize tools by read/write characteristics for optimization
+READ_ONLY_TOOLS = {
+    "read_state",
+    "search_memories",
+    "query_relationships",
+    "semantic_search",
+    "stateful_read",
+}
+
+WRITE_TOOLS = {
+    "add_memory",
+    "update_state",
+    "update_world",
+    "create_character",
+    "batch_memory",
+}
+
 
 def _get_message_content_as_string(message: BaseMessage) -> str:
     """
@@ -1014,12 +1031,24 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
                 f"[Tools] Has tool_calls attribute: {hasattr(last_message, 'tool_calls')}"
             )
 
-            # Extract tool call IDs for proper error handling
+            # Extract tool call IDs and categorize tools for optimization
             tool_call_ids = []
+            read_only_count = 0
+            write_count = 0
+            
             if hasattr(last_message, "tool_calls") and last_message.tool_calls:
                 tool_call_ids = [tc["id"] for tc in last_message.tool_calls]
+                
+                # Categorize tools
+                for tc in last_message.tool_calls:
+                    tool_name = tc.get("name", "unknown")
+                    if tool_name in READ_ONLY_TOOLS:
+                        read_only_count += 1
+                    elif tool_name in WRITE_TOOLS:
+                        write_count += 1
+                
                 logger.debug(
-                    f"[Tools] Tool calls: {len(tool_call_ids)} calls with IDs: {tool_call_ids}"
+                    f"[Tools] Executing {len(tool_call_ids)} tools: {read_only_count} read-only, {write_count} write tools"
                 )
                 self._verbose_log(
                     f"About to execute {len(tool_call_ids)} tools: {tool_call_ids}"
@@ -1048,17 +1077,25 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
                     result["messages"], "Tool execution - result messages"
                 )
 
-            # Track tool execution performance
+            # Track tool execution performance with detailed metrics
             execution_time = time_module.time() - execution_start
             execution_time_ms = execution_time * 1000
 
+            # Calculate average time per tool
+            avg_time_per_tool = (
+                execution_time_ms / len(tool_call_ids) if tool_call_ids else 0
+            )
+
             logger.info(
-                f"[Tools] Executed {len(tool_call_ids)} tools in {execution_time:.3f}s",
+                f"[Tools] Executed {len(tool_call_ids)} tools in {execution_time:.3f}s (avg: {avg_time_per_tool:.1f}ms/tool)",
                 extra={
                     "component": "Performance",
                     "execution_id": execution_id,
                     "tool_count": len(tool_call_ids),
+                    "read_only_count": read_only_count,
+                    "write_count": write_count,
                     "duration_ms": execution_time_ms,
+                    "avg_time_per_tool_ms": avg_time_per_tool,
                     "tool_ids": tool_call_ids,
                 },
             )
