@@ -22,6 +22,7 @@ A dynamic Choose-Your-Own-Adventure (CYOA) engine that generates interactive sto
 
 ## 📚 Documentation
 
+- **[QuickStart Guide](./QUICKSTART.md)** - **NEW!** Get started in minutes
 - **[Release & Deployment Guide](./RELEASE.md)** - **NEW!** Release process, branching strategy, and deployment
 - **[Performance Guide](./PERFORMANCE.md)** - Monitor and optimize LLM call performance
 - **[LM Studio Setup Guide](./LMSTUDIO_SETUP.md)** - Complete guide for running QuietStories with LM Studio locally
