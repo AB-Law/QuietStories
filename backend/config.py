@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     verbose_orchestrator: bool = True
     log_message_sequences: bool = True
     orchestrator_recursion_limit: int = Field(default=50)
-    
+
     # Performance optimization settings
     enable_performance_tracking: bool = Field(
         default=True,

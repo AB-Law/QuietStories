@@ -1035,10 +1035,10 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
             tool_call_ids = []
             read_only_count = 0
             write_count = 0
-            
+
             if hasattr(last_message, "tool_calls") and last_message.tool_calls:
                 tool_call_ids = [tc["id"] for tc in last_message.tool_calls]
-                
+
                 # Categorize tools
                 for tc in last_message.tool_calls:
                     tool_name = tc.get("name", "unknown")
@@ -1046,7 +1046,7 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
                         read_only_count += 1
                     elif tool_name in WRITE_TOOLS:
                         write_count += 1
-                
+
                 logger.debug(
                     f"[Tools] Executing {len(tool_call_ids)} tools: {read_only_count} read-only, {write_count} write tools"
                 )
