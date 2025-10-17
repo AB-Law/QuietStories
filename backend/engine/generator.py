@@ -35,8 +35,9 @@ class ScenarioGenerator:
         ]
 
         # Check if we're using OpenAI
-        # Structured output with function_calling is ONLY for OpenAI
-        # Local LLMs (lmstudio, ollama) and generic providers are much faster with direct JSON parsing
+        # Structured output is preferred for OpenAI (using function_calling).
+        # For other providers, structured output is attempted using json_schema as a fallback.
+        # For local LLMs (lmstudio, ollama) and generic providers, direct JSON parsing is often faster and may be used instead.
         from backend.config import settings
 
         use_structured_output = settings.model_provider == "openai"
