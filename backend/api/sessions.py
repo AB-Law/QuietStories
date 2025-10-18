@@ -27,6 +27,7 @@ from backend.utils.cache import (
 )
 from backend.utils.logger import get_logger
 
+import traceback
 # Set up logging
 logger = get_logger(__name__)
 
@@ -654,8 +655,9 @@ async def stream_turn_response(session_id: str, request: SessionTurnRequest):
 
         except Exception as e:
             logger.error(f"✗ Streaming turn processing failed: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-
+            logger.error(traceback.format_exc())
+            # Yield only a generic error message to clients
+            yield f"data: {json.dumps({'type': 'error', 'message': 'An internal error has occurred'})}\n\n"
     return StreamingResponse(
         generate_stream(),
         media_type="text/plain",
