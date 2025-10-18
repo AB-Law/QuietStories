@@ -9,8 +9,8 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, Union
 
-from langchain.schema import BaseMessage, HumanMessage
 from langchain.tools import BaseTool
+from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 
 from backend.utils.optimization import TokenEstimator

@@ -4,9 +4,9 @@ Ollama provider implementation using LangChain
 
 from typing import Any, Dict, List, Optional, Union
 
-from langchain.schema import BaseMessage
 from langchain.tools import BaseTool
 from langchain_community.llms import Ollama
+from langchain_core.messages import BaseMessage
 
 from .base import BaseProvider, ProviderResponse
 

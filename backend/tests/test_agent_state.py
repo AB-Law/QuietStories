@@ -10,8 +10,7 @@ from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
-from langchain.schema import AIMessage, HumanMessage, SystemMessage
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 from backend.engine.orchestrator import AgentState, TurnOrchestrator

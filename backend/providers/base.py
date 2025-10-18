@@ -7,8 +7,8 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Union
 
-from langchain.schema import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain.tools import BaseTool
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 from backend.utils.logger import get_logger
@@ -49,6 +49,8 @@ class BaseProvider(ABC):
         message_counts: Dict[str, int] = {}
         total_chars: int = 0
         message_details: List[Dict[str, Any]] = []
+        full_messages: List[Dict[str, Any]] = []
+
         for i, msg in enumerate(messages):
             msg_type = type(msg).__name__
             message_counts[msg_type] = message_counts.get(msg_type, 0) + 1
@@ -63,6 +65,14 @@ class BaseProvider(ABC):
                             content[:200] + "..." if len(content) > 200 else content
                         ),
                         "content_length": len(content),
+                    }
+                )
+                # Store full message for VERBOSE logging
+                full_messages.append(
+                    {
+                        "index": i,
+                        "type": msg_type,
+                        "content": content,
                     }
                 )
 
@@ -86,6 +96,7 @@ class BaseProvider(ABC):
         max_tokens = kwargs.get("max_tokens", "default")
         has_tools = len(tools) if tools else 0
 
+        # Standard INFO level logging
         logger.info(
             f"[LLM] Call started: {self.model_name}",
             extra={
@@ -104,6 +115,30 @@ class BaseProvider(ABC):
                 "request_params": {
                     k: v for k, v in kwargs.items() if k not in ["messages", "tools"]
                 },
+            },
+        )
+
+        # VERBOSE level logging - show full messages and tool definitions
+        logger.verbose(  # type: ignore
+            f"[LLM] Full request details for call {call_id}:",
+            extra={
+                "component": "LLM",
+                "call_id": call_id,
+                "full_messages": full_messages,
+                "full_tool_definitions": [
+                    {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "args_schema": (
+                            tool.args_schema.schema()  # type: ignore
+                            if hasattr(tool, "args_schema")
+                            and tool.args_schema
+                            and hasattr(tool.args_schema, "schema")
+                            else None
+                        ),
+                    }
+                    for tool in (tools or [])
+                ],
             },
         )
 
@@ -160,6 +195,13 @@ class BaseProvider(ABC):
             ):
                 usage_info = response.response_metadata["token_usage"]
 
+            # Standard INFO level logging with preview
+            response_preview = (
+                response_content[:500] + "..."
+                if len(response_content) > 500
+                else response_content
+            )
+
             logger.info(
                 f"[LLM] Call completed: {self.model_name} ({duration_ms}ms)",
                 extra={
@@ -169,10 +211,22 @@ class BaseProvider(ABC):
                     "provider": self.__class__.__name__,
                     "duration_ms": duration_ms,
                     "response_chars": response_chars,
-                    "response_content": response_content,
-                    "tool_calls": tool_calls,
+                    "response_preview": response_preview,
+                    "tool_calls_count": len(tool_calls),
                     "usage": usage_info,
                     "response_type": type(response).__name__,
+                },
+            )
+
+            # VERBOSE level logging - show full response content and tool calls
+            logger.verbose(  # type: ignore
+                f"[LLM] Full response for call {call_id}:",
+                extra={
+                    "component": "LLM",
+                    "call_id": call_id,
+                    "full_response_content": response_content,
+                    "full_tool_calls": tool_calls,
+                    "usage_details": usage_info,
                 },
             )
 

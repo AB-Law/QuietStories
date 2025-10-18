@@ -26,9 +26,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, Optional
 
+# Define custom VERBOSE level (between DEBUG and INFO)
+VERBOSE = 15  # DEBUG=10, INFO=20
+logging.addLevelName(VERBOSE, "VERBOSE")
+
 # Color codes for terminal output
 COLORS = {
     "DEBUG": "\033[36m",  # Cyan
+    "VERBOSE": "\033[96m",  # Bright Cyan
     "INFO": "\033[32m",  # Green
     "WARNING": "\033[33m",  # Yellow
     "ERROR": "\033[31m",  # Red
@@ -36,7 +41,17 @@ COLORS = {
     "RESET": "\033[0m",  # Reset
 }
 
-LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+LogLevel = Literal["DEBUG", "VERBOSE", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
+
+def verbose(self, message, *args, **kwargs):
+    """Log a message at VERBOSE level"""
+    if self.isEnabledFor(VERBOSE):
+        self._log(VERBOSE, message, args, **kwargs)
+
+
+# Add verbose method to Logger class
+logging.Logger.verbose = verbose  # type: ignore
 
 
 class ColoredFormatter(logging.Formatter):
@@ -66,7 +81,7 @@ def setup_logging(
     Setup logging configuration for the application
 
     Args:
-        level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        level: Logging level (DEBUG, VERBOSE, INFO, WARNING, ERROR, CRITICAL)
         log_file: Optional path to log file. If provided, logs will be written to file
         enable_colors: Whether to enable colored output for console
         include_timestamp: Whether to include timestamp in log messages
@@ -74,7 +89,10 @@ def setup_logging(
         enable_console_logging: Whether to enable console output (set False for production)
     """
     # Convert string level to logging level
-    numeric_level = getattr(logging, level.upper(), logging.INFO)
+    if level.upper() == "VERBOSE":
+        numeric_level = VERBOSE
+    else:
+        numeric_level = getattr(logging, level.upper(), logging.INFO)
 
     # Create formatters
     if include_timestamp:
@@ -173,7 +191,10 @@ class LogLevelContext:
     """Context manager to temporarily change logging level"""
 
     def __init__(self, level: LogLevel):
-        self.level = getattr(logging, level.upper())
+        if level.upper() == "VERBOSE":
+            self.level = VERBOSE
+        else:
+            self.level = getattr(logging, level.upper())
         self.old_level = None
 
     def __enter__(self):
@@ -193,7 +214,10 @@ def set_module_level(module_name: str, level: LogLevel) -> None:
         module_name: Name of the module (e.g., 'src.api.scenarios')
         level: Logging level to set
     """
-    numeric_level = getattr(logging, level.upper())
+    if level.upper() == "VERBOSE":
+        numeric_level = VERBOSE
+    else:
+        numeric_level = getattr(logging, level.upper())
     logging.getLogger(module_name).setLevel(numeric_level)
 
 

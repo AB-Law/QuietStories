@@ -13,8 +13,7 @@ from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain.schema import AIMessage, HumanMessage, SystemMessage
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from backend.engine.orchestrator import AgentState, TurnOrchestrator
 from backend.schemas.scenario import ScenarioSpec

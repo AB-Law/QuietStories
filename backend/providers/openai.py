@@ -6,8 +6,8 @@ import json
 import time
 from typing import Any, Dict, List, Optional, Union
 
-from langchain.schema import BaseMessage
 from langchain.tools import BaseTool
+from langchain_core.messages import BaseMessage
 from langchain_openai import ChatOpenAI
 
 # from langchain.callbacks import AsyncCallbackHandler  # Not needed for now
@@ -115,7 +115,7 @@ class OpenAIProvider(BaseProvider):
         """Check if OpenAI API is accessible"""
         try:
             # Simple health check by trying to invoke the model
-            from langchain.schema import HumanMessage
+            from langchain_core.messages import HumanMessage
 
             test_message = HumanMessage(content="Hello")
             await self.llm.ainvoke([test_message])

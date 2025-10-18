@@ -8,7 +8,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain.schema import AIMessage
+from langchain_core.messages import AIMessage
 
 from backend.engine.orchestrator import TurnOrchestrator
 from backend.schemas.scenario import ScenarioSpec

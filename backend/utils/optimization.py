@@ -15,7 +15,7 @@ import hashlib
 import json
 from typing import Any, Dict, List, Optional, Tuple, cast
 
-from langchain.schema import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from backend.utils.logger import get_logger
 

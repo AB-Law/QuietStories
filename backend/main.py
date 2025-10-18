@@ -20,7 +20,7 @@ from backend.utils.logger import LogLevel, get_logger, setup_logging
 
 # Initialize logging for Grafana/Loki integration
 log_level_raw = settings.log_level.upper()
-log_level: LogLevel = log_level_raw if log_level_raw in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] else "INFO"  # type: ignore
+log_level: LogLevel = log_level_raw if log_level_raw in ["DEBUG", "VERBOSE", "INFO", "WARNING", "ERROR", "CRITICAL"] else "INFO"  # type: ignore
 log_file = settings.log_file
 
 # Configure for centralized logging (disable console spam in production)
