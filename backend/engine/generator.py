@@ -105,47 +105,18 @@ class ScenarioGenerator:
             logger.info(f"LLM response length: {len(content)}")
             logger.info(f"LLM response first 300 chars: {content[:300]}")
 
-            # Clean the response - remove markdown code blocks and other formatting
-            content = content.strip()
-
-            # Remove markdown code blocks
-            if "```" in content:
-                # Extract content between code fences
-                match = re.search(r"```(?:json)?\s*\n(.*?)\n```", content, re.DOTALL)
-                if match:
-                    content = match.group(1)
-                    logger.info("Extracted JSON from markdown code block")
-                else:
-                    # Fallback: remove all lines with ```
-                    lines = [
-                        line
-                        for line in content.split("\n")
-                        if not line.strip().startswith("```")
-                    ]
-                    content = "\n".join(lines)
-                    logger.info("Removed markdown code fence lines")
+            # Use robust JSON extraction (same logic as in strategies)
+            content = self._extract_json_from_response(content)
 
             # Try to parse JSON
             try:
                 spec_data = json.loads(content)
                 logger.info("Successfully parsed JSON from fallback response")
             except json.JSONDecodeError as e2:
-                logger.warning(f"Initial JSON parse failed in fallback: {e2}")
-                # Try to extract JSON from response
-                start_idx = content.find("{")
-                end_idx = content.rfind("}") + 1
-                if start_idx != -1 and end_idx > start_idx:
-                    json_str = content[start_idx:end_idx]
-                    logger.info(
-                        f"Extracted JSON substring (length {len(json_str)}) in fallback"
-                    )
-                    spec_data = json.loads(json_str)
-                    logger.info("Successfully parsed extracted JSON in fallback")
-                else:
-                    logger.error(
-                        f"No valid JSON found in fallback. Content: {content[:500]}"
-                    )
-                    raise Exception("No valid JSON found in LLM response")
+                logger.error(
+                    f"JSON parsing failed after extraction. Content: {content[:500]}"
+                )
+                raise Exception(f"Failed to parse JSON from LLM response: {e2}")
 
             # Auto-fix common LLM mistakes with field names
             spec_data = self._fix_field_names(spec_data)
@@ -158,6 +129,48 @@ class ScenarioGenerator:
                 scenario_spec.seed = random.randint(1, 1000000)
 
             return scenario_spec
+
+    def _extract_json_from_response(self, content: str) -> str:
+        """
+        Extract JSON from LLM response with robust handling.
+
+        Handles:
+        - Markdown code blocks
+        - Extra text before/after JSON
+        - Common formatting issues
+
+        Args:
+            content: Raw LLM response
+
+        Returns:
+            Cleaned JSON string
+        """
+        import re
+
+        content = content.strip()
+
+        # Remove markdown code blocks
+        if "```" in content:
+            # Extract content between code fences
+            match = re.search(r"```(?:json)?\s*\n(.*?)\n```", content, re.DOTALL)
+            if match:
+                content = match.group(1)
+            else:
+                # Fallback: remove all lines with ```
+                lines = [
+                    line
+                    for line in content.split("\n")
+                    if not line.strip().startswith("```")
+                ]
+                content = "\n".join(lines)
+
+        # Extract JSON object
+        start_idx = content.find("{")
+        end_idx = content.rfind("}") + 1
+        if start_idx != -1 and end_idx > start_idx:
+            content = content[start_idx:end_idx]
+
+        return content
 
     def _fix_field_names(self, spec_data: Dict[str, Any]) -> Dict[str, Any]:
         """Fix common LLM mistakes with field names"""
