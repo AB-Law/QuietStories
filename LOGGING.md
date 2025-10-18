@@ -72,7 +72,13 @@ Change log retention period (1-30 days):
 Set these in your environment or `.env` file:
 
 ```bash
-# Log level for the application (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+# Log level for the application (DEBUG, VERBOSE, INFO, WARNING, ERROR, CRITICAL)
+# - DEBUG: Detailed diagnostic information (includes all internal state)
+# - VERBOSE: Enhanced logging showing full LLM requests/responses (recommended for troubleshooting)
+# - INFO: General application flow (default for production)
+# - WARNING: Potential issues and warnings
+# - ERROR: Error messages only
+# - CRITICAL: Critical failures only
 LOG_LEVEL=INFO
 
 # Optional: Custom log file path
@@ -80,6 +86,47 @@ LOG_FILE=/path/to/custom.log
 
 # Log retention period in days
 LOG_RETENTION_DAYS=7
+```
+
+### Logging Levels Explained
+
+QuietStories supports multiple logging levels to help you control the verbosity of logs:
+
+1. **CRITICAL** (50): Only critical failures that require immediate attention
+2. **ERROR** (40): Error messages indicating something went wrong
+3. **WARNING** (30): Warning messages for potentially problematic situations
+4. **INFO** (20): General application flow and status updates (default)
+5. **VERBOSE** (15): Enhanced logging with full LLM request/response details
+6. **DEBUG** (10): Detailed diagnostic information for debugging
+
+#### When to Use Each Level
+
+- **Production**: Use `INFO` or `WARNING` to keep logs clean while capturing important events
+- **Development**: Use `VERBOSE` to see detailed LLM interactions and API calls
+- **Debugging**: Use `DEBUG` to see all internal state changes and detailed execution flow
+- **Troubleshooting LLM Issues**: Use `VERBOSE` to see complete request/response payloads
+
+#### VERBOSE Level Details
+
+The VERBOSE level (new in this release) provides enhanced logging specifically for LLM provider interactions:
+
+- Shows complete message content sent to LLM providers
+- Displays full tool definitions and parameters
+- Logs complete response content (not just previews)
+- Shows all tool calls with their arguments
+- Includes detailed token usage information
+
+Example VERBOSE output:
+```
+2025-10-18 09:37:23 | INFO | backend.providers.base | [LLM] Call started: gpt-4o-mini
+2025-10-18 09:37:23 | VERBOSE | backend.providers.base | [LLM] Full request details for call abc123:
+  - Full messages: [{"type": "SystemMessage", "content": "You are a helpful assistant"}, ...]
+  - Full tool definitions: [{"name": "get_weather", "description": "...", "args_schema": {...}}]
+2025-10-18 09:37:24 | INFO | backend.providers.base | [LLM] Call completed: gpt-4o-mini (850.5ms)
+2025-10-18 09:37:24 | VERBOSE | backend.providers.base | [LLM] Full response for call abc123:
+  - Full response content: "The weather in San Francisco is..."
+  - Full tool calls: [{"id": "call_123", "name": "get_weather", "args": {"location": "SF"}}]
+  - Usage details: {"input_tokens": 125, "output_tokens": 75, "total_tokens": 200}
 ```
 
 ## Management Commands
@@ -158,10 +205,44 @@ from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# These will appear in Grafana with proper parsing
+# Standard logging levels
 logger.info("[Orchestrator] Processing turn 5")
 logger.error("Outcome parsing error: validation failed")
 logger.warning("[Memory] Cache miss for key: user_123")
+
+# VERBOSE level for detailed LLM interaction logging
+logger.verbose("[LLM] Full request payload: {...}")  # type: ignore
+logger.debug("[State] Current state: {...}")
+```
+
+### Using VERBOSE Logging in Your Code
+
+The VERBOSE level is perfect for logging detailed information about LLM interactions:
+
+```python
+from backend.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+# Log detailed API request information
+logger.verbose(  # type: ignore
+    "Sending request to LLM",
+    extra={
+        "request_payload": request_data,
+        "headers": headers,
+        "timeout": timeout_value,
+    }
+)
+
+# Log full response details
+logger.verbose(  # type: ignore
+    "Received LLM response",
+    extra={
+        "response_body": response.json(),
+        "status_code": response.status_code,
+        "latency_ms": elapsed_time,
+    }
+)
 ```
 
 ### Custom Log Fields
@@ -174,6 +255,16 @@ logger.info("[Parser] Successfully parsed outcome: narrative + 2 state_changes")
 
 # Add contextual information
 logger.info(f"[Session] Turn completed: {turn_id}, narrative length: {len(narrative)}")
+
+# Use extra fields for structured data
+logger.info(
+    "Processing turn",
+    extra={
+        "turn_id": turn_id,
+        "session_id": session_id,
+        "user_action": action,
+    }
+)
 ```
 
 ## Troubleshooting

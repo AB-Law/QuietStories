@@ -121,7 +121,7 @@ The system consists of:
    EMBEDDING_MODEL_NAME=nomic-embed-text
 
    # Logging (optional)
-   LOG_LEVEL=INFO  # DEBUG, INFO, WARNING, ERROR
+   LOG_LEVEL=INFO  # DEBUG, VERBOSE, INFO, WARNING, ERROR, CRITICAL
    LOG_FILE=logs/app.log
    ```
 
@@ -293,9 +293,14 @@ pytest --cov=backend --cov-report=html
 # Start server with debug logging
 LOG_LEVEL=DEBUG python -m uvicorn backend.main:app --reload
 
+# Start server with verbose LLM logging (shows full requests/responses)
+LOG_LEVEL=VERBOSE python -m uvicorn backend.main:app --reload
+
 # Run tests with debug output
 python random/api_test.py workflow "test" --log-level DEBUG
 ```
+
+For more information about logging levels and configuration, see [LOGGING.md](LOGGING.md).
 
 ## Development
 
@@ -412,7 +417,7 @@ All these checks are automatically run before each commit via pre-commit hooks.
 | `MODEL_PROVIDER` | LLM provider (openai/ollama/generic) | openai |
 | `OPENAI_API_KEY` | OpenAI API key | - |
 | `MODEL_NAME` | Model name | gpt-4 |
-| `LOG_LEVEL` | Logging level | INFO |
+| `LOG_LEVEL` | Logging level (DEBUG, VERBOSE, INFO, WARNING, ERROR, CRITICAL) | INFO |
 | `LOG_FILE` | Log file path | - |
 | `DATABASE_URL` | Database URL | sqlite:///data/quietstories.db |
 
@@ -475,6 +480,9 @@ All these checks are automatically run before each commit via pre-commit hooks.
 ```bash
 # Start with detailed logging
 LOG_LEVEL=DEBUG python -m uvicorn backend.main:app --reload
+
+# Or use VERBOSE to see full LLM requests/responses
+LOG_LEVEL=VERBOSE python -m uvicorn backend.main:app --reload
 
 # Use VSCode debugger (F5) for breakpoints
 ```
