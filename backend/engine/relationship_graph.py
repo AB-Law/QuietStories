@@ -467,7 +467,7 @@ Provide detailed analysis in this exact JSON format:
 
 Respond with ONLY the JSON object:"""
 
-            from langchain.schema import HumanMessage, SystemMessage
+            from langchain_core.messages import HumanMessage, SystemMessage
 
             response = await provider.chat(
                 [

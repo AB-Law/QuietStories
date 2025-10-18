@@ -8,7 +8,7 @@ when a new game session starts, enhancing the player's immersion.
 import json
 from typing import Any, Dict, List, Optional
 
-from langchain.schema import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from backend.providers import create_provider
 from backend.schemas import ScenarioSpec

@@ -6,7 +6,7 @@ import json
 import random
 from typing import Any, Dict, List
 
-from langchain.schema import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from backend.prompts import SCENARIO_GENERATION_SYSTEM, SCENARIO_GENERATION_USER
 from backend.providers import create_provider
