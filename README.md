@@ -2,28 +2,29 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A dynamic Choose-Your-Own-Adventure (CYOA) engine that generates interactive stories using AI. The engine accepts free-text scenario descriptions and automatically creates structured rules, working with both local and remote LLMs through a unified provider interface.
+A dynamic Choose-Your-Own-Adventure (CYOA) engine that generates interactive stories using AI. The engine accepts free-text scenario descriptions and automatically creates rich narrative experiences, working with both local and remote LLMs through a unified provider interface.
 
 ## Features
 
-- **Dynamic Scenario Generation**: Input any free-text description to generate a complete scenario with rules, actions, and events
+- **🚀 NEW: Simplified Scenario System**: Generate rich narratives with world backgrounds and character profiles - no complex rules needed!
+- **Dynamic Scenario Generation**: Input any free-text description to generate complete scenarios in seconds
 - **AI-Powered Narrator**: Uses LLMs to create engaging, context-aware story progression
 - **Multi-Provider Support**: Works with OpenAI, Ollama, LMStudio, and other OpenAI-compatible endpoints
 - **Local LLM Support**: Full support for running models locally via LMStudio or Ollama
 - **Local Embeddings**: Run semantic memory search completely locally without OpenAI API
 - **Smart Optimization**: Automatic context reduction, memory consolidation, and caching for faster performance
-- **Rule Enforcement**: Server-side validation ensures stories follow generated rules
+- **Dual Architecture**: Choose between simplified narrative-driven or legacy rule-based scenarios
 - **Memory System**: Public and private memory for entities with proper visibility controls
 - **Semantic Memory Search**: Find relevant memories by meaning, not just keywords
-- **Monte Carlo Balancing**: Automatic difficulty balancing through simulation
 - **RESTful API**: FastAPI-based backend with comprehensive endpoints
 - **React Frontend**: Modern web interface for story interaction
 - **Comprehensive Testing**: HTTP-based API testing and debugging tools
 
 ## 📚 Documentation
 
-- **[QuickStart Guide](./QUICKSTART.md)** - **NEW!** Get started in minutes
-- **[Release & Deployment Guide](./RELEASE.md)** - **NEW!** Release process, branching strategy, and deployment
+- **[Simplified Scenarios Guide](./SIMPLIFIED_SCENARIOS.md)** - **⭐ NEW!** Learn about the new narrative-driven approach
+- **[QuickStart Guide](./QUICKSTART.md)** - Get started in minutes
+- **[Release & Deployment Guide](./RELEASE.md)** - Release process, branching strategy, and deployment
 - **[Performance Guide](./PERFORMANCE.md)** - Monitor and optimize LLM call performance
 - **[LM Studio Setup Guide](./LMSTUDIO_SETUP.md)** - Complete guide for running QuietStories with LM Studio locally
 - **[Local Embeddings Guide](./LOCAL_EMBEDDINGS.md)** - Set up local embeddings for semantic memory search
@@ -59,11 +60,63 @@ The system consists of:
 
 - **Backend** (`backend/`): FastAPI server with scenario generation, compilation, and orchestration
 - **Frontend** (`frontend/`): React + TypeScript + Vite web application
-- **Engine** (`backend/engine/`): Core logic for scenario validation, compilation, and turn processing
+- **Engine** (`backend/engine/`): Core logic for scenario generation and turn processing
 - **Providers** (`backend/providers/`): LLM provider interfaces (OpenAI, Ollama, Generic)
 - **Database** (`backend/db/`): SQLite-based data persistence
-- **Schemas** (`backend/schemas/`): JSON schemas for validation
-- **Utils** (`backend/utils/`): Utilities for logging, debugging, and Monte Carlo simulation
+- **Schemas** (`backend/schemas/`): Data models for scenarios and outcomes
+- **Utils** (`backend/utils/`): Utilities for logging, debugging, and optimization
+
+## Two Approaches to Scenarios
+
+QuietStories supports two approaches to scenario creation:
+
+### 🌟 Simplified Scenarios (Default, Recommended)
+
+**Best for:** Creative storytelling, fast iteration, narrative-focused games
+
+```bash
+POST /scenarios/generate
+{
+  "description": "A mystery in Victorian London",
+  "num_characters": 3,
+  "player_name": "Detective Holmes"
+}
+```
+
+**Features:**
+- ✨ Rich world backgrounds (3-5 paragraphs)
+- 👥 Detailed character profiles with personalities
+- 🚀 2-3x faster generation
+- 🎭 Dynamic LLM-powered narrative
+- 📖 No complex rules or validation
+- 🎨 Maximum creative freedom
+
+[**Learn more →**](./SIMPLIFIED_SCENARIOS.md)
+
+### 🔧 Legacy ScenarioSpec
+
+**Best for:** Rule-based gameplay, precise mechanics, existing projects
+
+```bash
+POST /scenarios/generate?use_legacy=true
+{
+  "description": "Same description"
+}
+```
+
+**Features:**
+- ⚙️ Structured actions and preconditions
+- 🎲 JSONLogic rule enforcement
+- 📊 Monte Carlo difficulty balancing
+- 🔄 Random events with weights
+- ⚖️ Loss conditions and negativity budgets
+- 🎯 Precise game mechanics
+
+Both approaches:
+- Use the same API endpoints
+- Support the memory system
+- Work with all LLM providers
+- Can coexist in the same project
 
 ## Quick Start
 
