@@ -128,77 +128,125 @@ async def create_session(request: SessionCreateRequest):
         logger.error("Scenario must be compiled before creating a session")
         raise HTTPException(status_code=400, detail="Scenario must be compiled first")
 
-    # Create the scenario spec (ensure scenario_data is a mapping)
+    # Create the scenario spec or simplified scenario (check type)
     if not isinstance(scenario_data, dict) or "spec" not in scenario_data:
         logger.error(f"Invalid scenario data for id: {request.scenario_id}")
         raise HTTPException(status_code=500, detail="Invalid scenario data")
 
     spec_dict = scenario_data["spec"]
-    spec = ScenarioSpec(**spec_dict)
-    logger.info(f"Loaded scenario spec: {spec.name}")
-    logger.debug(f"Spec has {len(spec.actions) if spec.actions else 0} actions")
-    logger.debug(f"Spec has {len(spec.entities) if spec.entities else 0} entities")
+
+    # Determine scenario type
+    is_simplified = spec_dict.get("type") == "simplified"
+    is_legacy = spec_dict.get("type") == "legacy"
+
+    if is_simplified:
+        logger.info("Creating session from simplified scenario")
+        from backend.schemas.simplified import SimplifiedScenario
+
+        scenario_data_inner = spec_dict.get("data", {})
+        scenario = SimplifiedScenario(**scenario_data_inner)
+        logger.info(f"Loaded simplified scenario: {scenario.name}")
+        logger.debug(f"Characters: {len(scenario.characters)}")
+    elif is_legacy:
+        logger.info("Creating session from legacy ScenarioSpec")
+        scenario_data_inner = spec_dict.get("data", {})
+        spec = ScenarioSpec(**scenario_data_inner)
+        logger.info(f"Loaded legacy scenario spec: {spec.name}")
+        logger.debug(f"Spec has {len(spec.actions) if spec.actions else 0} actions")
+        logger.debug(f"Spec has {len(spec.entities) if spec.entities else 0} entities")
+        scenario = spec  # Use spec as scenario for legacy path
+    else:
+        # Assume old format (direct ScenarioSpec, no type wrapper)
+        logger.info("Creating session from unwrapped ScenarioSpec (old format)")
+        spec = ScenarioSpec(**spec_dict)
+        logger.info(f"Loaded scenario spec: {spec.name}")
+        logger.debug(f"Spec has {len(spec.actions) if spec.actions else 0} actions")
+        logger.debug(f"Spec has {len(spec.entities) if spec.entities else 0} entities")
+        scenario = spec
+        is_legacy = True
 
     # Create session ID
     session_id = str(uuid.uuid4())
-    seed_value = request.seed or spec.seed
-    initial_state = spec.state.copy() if spec.state else {}
 
-    logger.debug(f"Using seed: {seed_value}")
-    logger.debug(f"Initial state keys: {list(initial_state.keys())}")
+    # Initialize based on scenario type
+    if is_simplified:
+        # Simplified scenario: already has world background and characters
+        from backend.schemas.simplified import SimplifiedScenario
 
-    # Get config or use defaults
-    config = request.config if request.config else SessionConfig()
+        assert isinstance(scenario, SimplifiedScenario)
+        world_background = scenario.world_background.description
+        detailed_entities = [char.dict() for char in scenario.characters]
+        initial_state = scenario.initial_state.copy()
+        seed_value = request.seed or 42  # Default seed for simplified scenarios
 
-    # Retrieve user settings for player name if not provided in config
-    if not config.player_name:
-        user_settings = db.get_user_settings()
-        if user_settings:
-            config.player_name = user_settings.get("player_name")
-            logger.debug(f"Using player name from settings: {config.player_name}")
+        logger.info(f"✓ Using world background from simplified scenario")
+        logger.info(f"✓ Using {len(detailed_entities)} characters from scenario")
+    else:
+        # Legacy scenario: use SessionInitializer for world background
+        assert isinstance(scenario, ScenarioSpec)
+        seed_value = request.seed or scenario.seed
+        initial_state = scenario.state.copy() if scenario.state else {}
 
-    logger.debug(
-        f"Session config: num_characters={config.num_characters}, gen_world={config.generate_world_background}, gen_entities={config.generate_entity_backgrounds}, player_name={config.player_name}"
-    )
+        logger.debug(f"Using seed: {seed_value}")
+        logger.debug(f"Initial state keys: {list(initial_state.keys())}")
 
-    # Apply custom state if provided
-    if config.custom_state:
-        initial_state.update(config.custom_state)
-        logger.debug("Applied custom state overrides")
+        # Get config or use defaults
+        config = request.config if request.config else SessionConfig()
 
-    # Use custom entities if provided
-    if config.initial_entities:
-        spec.entities = config.initial_entities
-        logger.debug(f"Using {len(config.initial_entities)} custom initial entities")
+        # Retrieve user settings for player name if not provided in config
+        if not config.player_name:
+            user_settings = db.get_user_settings()
+            if user_settings:
+                config.player_name = user_settings.get("player_name")
+                logger.debug(f"Using player name from settings: {config.player_name}")
 
-    # Initialize world and entities based on config
-    logger.info("Initializing session world and entities...")
-    try:
-        initializer = SessionInitializer()
-        init_data = await initializer.initialize_session(
-            spec,
-            session_id,
-            num_characters=config.num_characters,
-            generate_world=config.generate_world_background,
-            generate_entities=config.generate_entity_backgrounds,
-            player_name=config.player_name,
+        logger.debug(
+            f"Session config: num_characters={config.num_characters}, gen_world={config.generate_world_background}, gen_entities={config.generate_entity_backgrounds}, player_name={config.player_name}"
         )
 
-        world_background = init_data["world_background"]
-        detailed_entities = init_data["entities"]
+        # Apply custom state if provided
+        if config.custom_state:
+            initial_state.update(config.custom_state)
+            logger.debug("Applied custom state overrides")
 
-        logger.info(f"✓ World initialized ({len(world_background)} chars)")
-        logger.info(f"✓ {len(detailed_entities)} entities initialized")
-    except Exception as e:
-        logger.error(f"Session initialization failed: {e}", exc_info=True)
-        # Continue with basic data
-        world_background = f"Welcome to {spec.name}. Your adventure begins here."
-        detailed_entities = spec.entities
+        # Use custom entities if provided
+        if config.initial_entities:
+            scenario.entities = config.initial_entities
+            logger.debug(
+                f"Using {len(config.initial_entities)} custom initial entities"
+            )
+
+        # Initialize world and entities based on config
+        logger.info("Initializing session world and entities...")
+        try:
+            initializer = SessionInitializer()
+            init_data = await initializer.initialize_session(
+                scenario,
+                session_id,
+                num_characters=config.num_characters,
+                generate_world=config.generate_world_background,
+                generate_entities=config.generate_entity_backgrounds,
+                player_name=config.player_name,
+            )
+
+            world_background = init_data["world_background"]
+            detailed_entities = init_data["entities"]
+
+            logger.info(f"✓ World initialized ({len(world_background)} chars)")
+            logger.info(f"✓ {len(detailed_entities)} entities initialized")
+        except Exception as e:
+            logger.error(f"Session initialization failed: {e}", exc_info=True)
+            # Continue with basic data
+            world_background = (
+                f"Welcome to {scenario.name}. Your adventure begins here."
+            )
+            detailed_entities = scenario.entities
 
     # Create session data
     session_data = {
         "id": session_id,
         "scenario_id": request.scenario_id,
+        "scenario_type": "simplified" if is_simplified else "legacy",
         "seed": seed_value,
         "state": initial_state,
         "turn": 0,
@@ -215,9 +263,24 @@ async def create_session(request: SessionCreateRequest):
     logger.debug("Saving session to database...")
     db.save_session(session_data)
 
-    # Create orchestrator for this session
-    logger.debug("Creating TurnOrchestrator...")
-    orchestrator = TurnOrchestrator(spec, session_id, db)
+    # Create appropriate orchestrator for this session
+    logger.debug("Creating orchestrator...")
+    if is_simplified:
+        from backend.engine.simplified_orchestrator import SimplifiedOrchestrator
+        from backend.schemas.simplified import SimplifiedScenario
+
+        # Reconstruct SimplifiedScenario from stored data
+        if isinstance(scenario, SimplifiedScenario):
+            orchestrator = SimplifiedOrchestrator(scenario, session_id, db)
+        else:
+            # Shouldn't happen but handle gracefully
+            raise HTTPException(
+                status_code=500, detail="Invalid scenario type for orchestrator"
+            )
+    else:
+        # Legacy ScenarioSpec
+        orchestrator = TurnOrchestrator(scenario, session_id, db)
+
     orchestrator.set_session_ref(
         session_data
     )  # Set reference for accessing turn history
@@ -307,31 +370,65 @@ async def process_turn(session_id: str, request: SessionTurnRequest):
             logger.warning(
                 "Orchestrator not found in cache, recreating from session data..."
             )
-            spec = ScenarioSpec(**session["scenario_spec"])
-            # Update spec entities with the detailed entities from session
-            spec.entities = session.get("entities", spec.entities)
-            orchestrator = TurnOrchestrator(spec, session_id, db)
+
+            # Determine scenario type
+            scenario_type = session.get("scenario_type", "legacy")
+            spec_dict = session["scenario_spec"]
+
+            if scenario_type == "simplified":
+                # Recreate SimplifiedOrchestrator
+                from backend.engine.simplified_orchestrator import (
+                    SimplifiedOrchestrator,
+                )
+                from backend.schemas.simplified import SimplifiedScenario
+
+                # Extract scenario data
+                if isinstance(spec_dict, dict) and "data" in spec_dict:
+                    scenario_data = spec_dict["data"]
+                else:
+                    scenario_data = spec_dict
+
+                scenario = SimplifiedScenario(**scenario_data)
+                orchestrator = SimplifiedOrchestrator(scenario, session_id, db)
+                logger.info("✓ SimplifiedOrchestrator recreated")
+            else:
+                # Recreate legacy TurnOrchestrator
+                # Handle both wrapped and unwrapped formats
+                if isinstance(spec_dict, dict) and spec_dict.get("type") == "legacy":
+                    actual_spec = spec_dict.get("data", {})
+                else:
+                    actual_spec = spec_dict
+
+                spec = ScenarioSpec(**actual_spec)
+                # Update spec entities with the detailed entities from session
+                spec.entities = session.get("entities", spec.entities)
+                orchestrator = TurnOrchestrator(spec, session_id, db)
+                logger.info("✓ TurnOrchestrator recreated")
+
             orchestrator.set_session_ref(
                 session
             )  # Set reference for turn history access
             orchestrators_db[session_id] = orchestrator
-            logger.info("✓ Orchestrator recreated")
         else:
             orchestrator = orchestrators_db[session_id]
             # Update session reference in case it was reloaded
             orchestrator.set_session_ref(session)
 
-            # CRITICAL: Update orchestrator entities with session entities to preserve backgrounds
-            session_entities = session.get("entities", [])
-            if session_entities:
-                logger.info(
-                    f"[CharacterDebug] Updating cached orchestrator with {len(session_entities)} session entities"
-                )
-                orchestrator.spec.entities = session_entities
-                # Also update the compiler's spec
-                orchestrator.compiler.spec.entities = session_entities
+            # CRITICAL: Update orchestrator entities for legacy scenarios
+            if hasattr(orchestrator, "spec") and hasattr(orchestrator.spec, "entities"):
+                session_entities = session.get("entities", [])
+                if session_entities:
+                    logger.info(
+                        f"[CharacterDebug] Updating cached orchestrator with {len(session_entities)} session entities"
+                    )
+                    orchestrator.spec.entities = session_entities
+                    # Also update the compiler's spec if it exists
+                    if hasattr(orchestrator, "compiler"):
+                        orchestrator.compiler.spec.entities = session_entities
 
-        logger.debug(f"Orchestrator spec: {orchestrator.spec.name}")
+        logger.debug(
+            f"Orchestrator type: {orchestrator.__class__.__name__}, scenario: {getattr(orchestrator, 'scenario', getattr(orchestrator, 'spec', None)).__class__.__name__}"
+        )
 
         # Log state before turn
         state_before = session.get("state", {})
