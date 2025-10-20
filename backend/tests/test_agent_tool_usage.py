@@ -56,7 +56,10 @@ class TestLanggraphAgentToolUsage:
         with patch("backend.engine.orchestrator.create_provider") as mock_provider:
             mock_provider.return_value = AsyncMock()
             orchestrator = TurnOrchestrator(
-                spec=mock_scenario_spec, session_id="test_session", db_manager=None
+                session_id="test_session",
+                db_manager=None,
+                world_background=mock_scenario_spec.name,
+                entities=mock_scenario_spec.entities,
             )
             return orchestrator
 
@@ -419,7 +422,12 @@ class TestAgentToolOrchestrationPerformance:
         )
 
         with patch("backend.engine.orchestrator.create_provider"):
-            return TurnOrchestrator(spec, "perf_test_session")
+            return TurnOrchestrator(
+                session_id="perf_test_session",
+                db_manager=None,
+                world_background=spec.name,
+                entities=spec.entities,
+            )
 
     def test_routing_decision_performance(self, performance_orchestrator):
         """Test that routing decisions are made efficiently."""

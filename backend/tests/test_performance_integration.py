@@ -58,9 +58,10 @@ async def test_orchestrator_performance_tracking(mock_scenario_spec, mock_db_man
 
         # Create orchestrator
         orchestrator = TurnOrchestrator(
-            spec=mock_scenario_spec,
             session_id="test_session",
             db_manager=mock_db_manager,
+            world_background="Test Scenario",
+            entities=mock_scenario_spec.entities,
         )
 
         # Process a turn (this will trigger performance tracking)
@@ -118,9 +119,10 @@ async def test_tool_execution_metrics(mock_scenario_spec, mock_db_manager):
         mock_provider.return_value = mock_provider_instance
 
         orchestrator = TurnOrchestrator(
-            spec=mock_scenario_spec,
             session_id="test_tool_session",
             db_manager=mock_db_manager,
+            world_background="Test Scenario",
+            entities=mock_scenario_spec.entities,
         )
 
         try:

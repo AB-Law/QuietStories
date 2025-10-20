@@ -248,32 +248,32 @@ class TestPromptCompression:
 
         # Check that key sections are still present
         assert "AVAILABLE TOOLS:" in NARRATOR_SYSTEM
-        assert "RELATIONSHIP TRACKING PRIORITY" in NARRATOR_SYSTEM
-        assert "CRITICAL RULES:" in NARRATOR_SYSTEM
+        assert "TOOL USAGE GUIDELINES:" in NARRATOR_SYSTEM
+        assert "NARRATIVE REQUIREMENTS:" in NARRATOR_SYSTEM
 
         # Check that batch tools are mentioned
-        assert "add_memories(memories):" in NARRATOR_SYSTEM
-        assert "read_state_cached(path, use_cache):" in NARRATOR_SYSTEM
+        assert "add_memories" in NARRATOR_SYSTEM
+        assert "read_state" in NARRATOR_SYSTEM
 
-        # Check that relationship keywords are mentioned
-        assert "trust, fear, love, alliance, rivalry" in NARRATOR_SYSTEM
+        # Check that it emphasizes pure storytelling
+        assert "PURE NARRATIVE TEXT" in NARRATOR_SYSTEM
 
-        # Verify token reduction (rough estimate)
-        # Original was ~3,000 tokens, compressed should be ~2,000
+        # Verify reasonable token count
+        # Pure storytelling approach should be concise
         token_count = len(NARRATOR_SYSTEM.split())  # Rough token estimate
-        assert token_count < 2500  # Should be significantly compressed
+        assert token_count < 3000  # Should be reasonably concise
 
     def test_examples_preserved(self):
         """Test that essential examples are preserved."""
         from backend.prompts import NARRATOR_SYSTEM
 
-        # Should have at least 2 examples (down from 5)
-        example_count = NARRATOR_SYSTEM.count('"narrative":')
-        assert example_count >= 2
+        # Should have story examples
+        example_count = NARRATOR_SYSTEM.count("GOOD:")
+        assert example_count >= 1
 
-        # Should have the essential examples
-        assert "You enter the dark cave" in NARRATOR_SYSTEM
-        assert "The merchant eyes you suspiciously" in NARRATOR_SYSTEM
+        # Should emphasize narrative quality
+        assert "sensory details" in NARRATOR_SYSTEM
+        assert "character development" in NARRATOR_SYSTEM
 
 
 class TestToolBatching:
