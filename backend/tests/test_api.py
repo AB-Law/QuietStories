@@ -97,17 +97,18 @@ class TestScenariosAPI:
     @patch("backend.api.scenarios.db")
     def test_generate_scenario_success(self, mock_db, mock_generator_class):
         """Test successful scenario generation"""
-        # Mock the generator
+        # Mock the generator to return simplified scenario data
         mock_generator = MagicMock()
-        mock_scenario_spec = MagicMock()
-        mock_scenario_spec.name = "Generated Scenario"
-        mock_scenario_spec.spec_version = "1.0"
-        mock_scenario_spec.dict.return_value = {
-            "name": "Generated Scenario",
-            "actions": [],
+        mock_scenario_data = {
+            "description": "A test scenario description",
+            "world_background": "A beautiful fantasy world...",
+            "entities": [
+                {"id": "hero", "type": "character", "name": "Hero"},
+                {"id": "villain", "type": "character", "name": "Villain"},
+            ],
         }
         # Use AsyncMock for async method
-        mock_generator.generate_scenario = AsyncMock(return_value=mock_scenario_spec)
+        mock_generator.generate_scenario = AsyncMock(return_value=mock_scenario_data)
         mock_generator_class.return_value = mock_generator
 
         # Mock db save
@@ -119,7 +120,7 @@ class TestScenariosAPI:
         assert response.status_code == 200
         data = response.json()
         assert "id" in data
-        assert data["name"] == "Generated Scenario"
+        assert "name" in data  # Name is generated from ID
         assert data["status"] == "generated"
 
     @patch("backend.api.scenarios.ScenarioGenerator")

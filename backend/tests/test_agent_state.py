@@ -90,6 +90,7 @@ class TestAgentStateManagement:
                 "memory_state": state_orchestrator._get_memory_state_snapshot(),
                 "error_recovery_active": False,
                 "error_context": None,
+                "final_narrative": None,
             }
 
             # Verify all required fields are present and properly typed
@@ -135,6 +136,7 @@ class TestAgentStateManagement:
             "memory_state": None,
             "error_recovery_active": False,
             "error_context": None,
+            "final_narrative": None,
         }
 
         context = state_orchestrator._build_context_from_state(test_state)
@@ -226,6 +228,7 @@ class TestAgentStateManagement:
             "memory_state": None,
             "error_recovery_active": False,
             "error_context": None,
+            "final_narrative": None,
         }
 
         # Test context building gets updated state
@@ -265,6 +268,7 @@ class TestAgentStateManagement:
             "memory_state": None,
             "error_recovery_active": True,
             "error_context": error_context,
+            "final_narrative": None,
         }
 
         assert state_with_errors["error_recovery_active"] is True
@@ -312,6 +316,7 @@ class TestAgentStateManagement:
             "memory_state": {"snapshot": True},
             "error_recovery_active": False,
             "error_context": None,
+            "final_narrative": None,
         }
 
         # Simulate state update from agent node
@@ -428,6 +433,7 @@ class TestStateManagementIntegration:
                 "memory_state": initial_snapshot,
                 "error_recovery_active": False,
                 "error_context": None,
+                "final_narrative": None,
             }
 
             updated_context = orchestrator._build_context_from_state(test_state)

@@ -94,11 +94,11 @@ class SessionTurnRequest(BaseModel):
 @router.post("/", response_model=SessionCreateResponse)
 async def create_session(request: SessionCreateRequest):
     """
-    Create a new session from a compiled scenario.
+    Create a new session from a generated scenario.
 
     This endpoint:
-    1. Validates the scenario exists and is compiled
-    2. Generates world background and entity details
+    1. Validates the scenario exists
+    2. Uses the world background and entities directly
     3. Creates session in database
     4. Initializes orchestrator
 
@@ -110,7 +110,6 @@ async def create_session(request: SessionCreateRequest):
 
     Raises:
         HTTPException 404: Scenario not found
-        HTTPException 400: Scenario not compiled
     """
     logger.info("=" * 60)
     logger.info(f"SESSION CREATION REQUEST")
@@ -123,29 +122,20 @@ async def create_session(request: SessionCreateRequest):
         logger.error(f"✗ Scenario not found: {request.scenario_id}")
         raise HTTPException(status_code=404, detail="Scenario not found")
 
-    if scenario_data["status"] != "compiled":
-        logger.error(f"✗ Scenario not compiled: {scenario_data['status']}")
-        logger.error("Scenario must be compiled before creating a session")
-        raise HTTPException(status_code=400, detail="Scenario must be compiled first")
+    # Get the simplified scenario data
+    spec_data = scenario_data.get("spec", {})
+    world_background = spec_data.get("world_background", "")
+    entities = spec_data.get("entities", [])
 
-    # Create the scenario spec (ensure scenario_data is a mapping)
-    if not isinstance(scenario_data, dict) or "spec" not in scenario_data:
-        logger.error(f"Invalid scenario data for id: {request.scenario_id}")
-        raise HTTPException(status_code=500, detail="Invalid scenario data")
-
-    spec_dict = scenario_data["spec"]
-    spec = ScenarioSpec(**spec_dict)
-    logger.info(f"Loaded scenario spec: {spec.name}")
-    logger.debug(f"Spec has {len(spec.actions) if spec.actions else 0} actions")
-    logger.debug(f"Spec has {len(spec.entities) if spec.entities else 0} entities")
+    logger.info(f"Loaded scenario data")
+    logger.debug(f"World background length: {len(world_background)}")
+    logger.debug(f"Number of entities: {len(entities)}")
 
     # Create session ID
     session_id = str(uuid.uuid4())
-    seed_value = request.seed or spec.seed
-    initial_state = spec.state.copy() if spec.state else {}
+    seed_value = request.seed or 12345  # Simple default seed
 
     logger.debug(f"Using seed: {seed_value}")
-    logger.debug(f"Initial state keys: {list(initial_state.keys())}")
 
     # Get config or use defaults
     config = request.config if request.config else SessionConfig()
@@ -161,39 +151,18 @@ async def create_session(request: SessionCreateRequest):
         f"Session config: num_characters={config.num_characters}, gen_world={config.generate_world_background}, gen_entities={config.generate_entity_backgrounds}, player_name={config.player_name}"
     )
 
-    # Apply custom state if provided
-    if config.custom_state:
-        initial_state.update(config.custom_state)
-        logger.debug("Applied custom state overrides")
+    # Use entities from scenario data
+    if entities:
+        logger.debug(f"Using {len(entities)} entities from scenario")
+    else:
+        logger.warning("No entities found in scenario data")
 
-    # Use custom entities if provided
-    if config.initial_entities:
-        spec.entities = config.initial_entities
-        logger.debug(f"Using {len(config.initial_entities)} custom initial entities")
-
-    # Initialize world and entities based on config
-    logger.info("Initializing session world and entities...")
-    try:
-        initializer = SessionInitializer()
-        init_data = await initializer.initialize_session(
-            spec,
-            session_id,
-            num_characters=config.num_characters,
-            generate_world=config.generate_world_background,
-            generate_entities=config.generate_entity_backgrounds,
-            player_name=config.player_name,
-        )
-
-        world_background = init_data["world_background"]
-        detailed_entities = init_data["entities"]
-
-        logger.info(f"✓ World initialized ({len(world_background)} chars)")
-        logger.info(f"✓ {len(detailed_entities)} entities initialized")
-    except Exception as e:
-        logger.error(f"Session initialization failed: {e}", exc_info=True)
-        # Continue with basic data
-        world_background = f"Welcome to {spec.name}. Your adventure begins here."
-        detailed_entities = spec.entities
+    # Create basic initial state
+    initial_state = {
+        "turn": 0,
+        "player": {"health": 100, "name": config.player_name or "Player"},
+        "world": {"time_of_day": "morning", "day": 1},
+    }
 
     # Create session data
     session_data = {
@@ -204,23 +173,26 @@ async def create_session(request: SessionCreateRequest):
         "turn": 0,
         "turn_history": [],
         "world_background": world_background,
-        "entities": detailed_entities,
+        "entities": entities,
         "private_memory": {},
         "public_memory": {},
         "status": "active",
-        "scenario_spec": spec_dict,
+        "scenario_spec": spec_data,  # Store the simplified scenario data
     }
 
     # Save to database
     logger.debug("Saving session to database...")
     db.save_session(session_data)
 
-    # Create orchestrator for this session
+    # Create a simple orchestrator that doesn't rely on complex ScenarioSpec
     logger.debug("Creating TurnOrchestrator...")
-    orchestrator = TurnOrchestrator(spec, session_id, db)
-    orchestrator.set_session_ref(
-        session_data
-    )  # Set reference for accessing turn history
+    orchestrator = TurnOrchestrator(
+        session_id=session_id,
+        db_manager=db,
+        world_background=world_background,
+        entities=entities,
+    )
+    orchestrator.set_session_ref(session_data)
     orchestrators_db[session_id] = orchestrator
 
     logger.info(f"✓ Session created successfully: {session_id}")
@@ -307,13 +279,23 @@ async def process_turn(session_id: str, request: SessionTurnRequest):
             logger.warning(
                 "Orchestrator not found in cache, recreating from session data..."
             )
-            spec = ScenarioSpec(**session["scenario_spec"])
-            # Update spec entities with the detailed entities from session
-            spec.entities = session.get("entities", spec.entities)
-            orchestrator = TurnOrchestrator(spec, session_id, db)
+            # Create orchestrator with session data (new constructor doesn't take ScenarioSpec)
+            entities = session.get("entities", [])
+            world_background = session.get("scenario_spec", {}).get("description", "")
+            orchestrator = TurnOrchestrator(
+                session_id=session_id,
+                db_manager=db,
+                world_background=world_background,
+                entities=entities,
+            )
             orchestrator.set_session_ref(
                 session
             )  # Set reference for turn history access
+
+            # Restore game state from session if available
+            if "state" in session:
+                orchestrator.state = session["state"]
+
             orchestrators_db[session_id] = orchestrator
             logger.info("✓ Orchestrator recreated")
         else:
@@ -321,17 +303,15 @@ async def process_turn(session_id: str, request: SessionTurnRequest):
             # Update session reference in case it was reloaded
             orchestrator.set_session_ref(session)
 
-            # CRITICAL: Update orchestrator entities with session entities to preserve backgrounds
+            # Update orchestrator entities with session entities to preserve backgrounds
             session_entities = session.get("entities", [])
             if session_entities:
                 logger.info(
                     f"[CharacterDebug] Updating cached orchestrator with {len(session_entities)} session entities"
                 )
-                orchestrator.spec.entities = session_entities
-                # Also update the compiler's spec
-                orchestrator.compiler.spec.entities = session_entities
+                orchestrator.entities = session_entities
 
-        logger.debug(f"Orchestrator spec: {orchestrator.spec.name}")
+        logger.debug(f"Orchestrator state: {orchestrator.state}")
 
         # Log state before turn
         state_before = session.get("state", {})
@@ -379,14 +359,14 @@ async def process_turn(session_id: str, request: SessionTurnRequest):
 
         # Update session
         new_turn = current_turn + 1
-        state_after = orchestrator.spec.state
+        state_after = orchestrator.state
 
         # Add turn to history
         turn_history = session.get("turn_history", [])
         turn_history.append(turn_record)
 
         # Get entities from orchestrator but preserve backgrounds from session
-        orchestrator_entities = orchestrator.spec.entities
+        orchestrator_entities = orchestrator.entities
         original_entities = session.get("entities", [])
 
         # Create a map of original entities by ID to preserve backgrounds
@@ -554,15 +534,36 @@ async def stream_turn_response(session_id: str, request: SessionTurnRequest):
                 logger.warning(
                     "Orchestrator not found in cache, recreating from session data..."
                 )
-                spec = ScenarioSpec(**session["scenario_spec"])
-                spec.entities = session.get("entities", spec.entities)
-                orchestrator = TurnOrchestrator(spec, session_id, db)
+                # Create orchestrator with session data (new constructor doesn't take ScenarioSpec)
+                entities = session.get("entities", [])
+                world_background = session.get("scenario_spec", {}).get(
+                    "description", ""
+                )
+                orchestrator = TurnOrchestrator(
+                    session_id=session_id,
+                    db_manager=db,
+                    world_background=world_background,
+                    entities=entities,
+                )
                 orchestrator.set_session_ref(session)
+
+                # Restore game state from session if available
+                if "state" in session:
+                    orchestrator.state = session["state"]
+
                 orchestrators_db[session_id] = orchestrator
                 logger.info("✓ Orchestrator recreated")
             else:
                 orchestrator = orchestrators_db[session_id]
                 orchestrator.set_session_ref(session)
+
+                # Update orchestrator entities with session entities
+                session_entities = session.get("entities", [])
+                if session_entities:
+                    logger.info(
+                        f"[CharacterDebug] Updating cached orchestrator with {len(session_entities)} session entities"
+                    )
+                    orchestrator.entities = session_entities
 
             # Process turn with streaming
             logger.info("Processing turn with streaming...")
@@ -618,14 +619,14 @@ async def stream_turn_response(session_id: str, request: SessionTurnRequest):
 
             # Update session in database
             new_turn = current_turn + 1
-            state_after = orchestrator.spec.state
+            state_after = orchestrator.state
 
             # Add turn to history
             turn_history = session.get("turn_history", [])
             turn_history.append(turn_record)
 
             # Get updated entities and memories
-            entities = orchestrator.spec.entities
+            entities = orchestrator.entities
             private_memory = dict(orchestrator.memory.private_memory)
             public_memory = dict(orchestrator.memory.public_memory)
 
@@ -739,7 +740,14 @@ async def get_relationships(session_id: str):
         from backend.schemas import ScenarioSpec
 
         spec = ScenarioSpec(**session["scenario_spec"])
-        temp_orchestrator = TurnOrchestrator(spec, session_id, db)
+        entities = session.get("entities", [])
+        world_background = session.get("scenario_spec", {}).get("description", "")
+        temp_orchestrator = TurnOrchestrator(
+            session_id=session_id,
+            db_manager=db,
+            world_background=world_background,
+            entities=entities,
+        )
         orchestrators_db[session_id] = temp_orchestrator
 
     orchestrator = orchestrators_db[session_id]
@@ -817,7 +825,14 @@ async def get_session_memories(session_id: str):
     if session_id not in orchestrators_db:
         logger.debug("Recreating orchestrator to access memories...")
         spec = ScenarioSpec(**session["scenario_spec"])
-        orchestrator = TurnOrchestrator(spec, session_id, db)
+        entities = session.get("entities", [])
+        world_background = session.get("scenario_spec", {}).get("description", "")
+        orchestrator = TurnOrchestrator(
+            session_id=session_id,
+            db_manager=db,
+            world_background=world_background,
+            entities=entities,
+        )
         orchestrator.set_session_ref(session)
         orchestrators_db[session_id] = orchestrator
     else:
@@ -889,7 +904,14 @@ async def get_entity_relationships(session_id: str, entity_id: str):
         from backend.schemas import ScenarioSpec
 
         spec = ScenarioSpec(**session["scenario_spec"])
-        temp_orchestrator = TurnOrchestrator(spec, session_id, db)
+        entities = session.get("entities", [])
+        world_background = session.get("scenario_spec", {}).get("description", "")
+        temp_orchestrator = TurnOrchestrator(
+            session_id=session_id,
+            db_manager=db,
+            world_background=world_background,
+            entities=entities,
+        )
         orchestrators_db[session_id] = temp_orchestrator
 
     orchestrator = orchestrators_db[session_id]
@@ -945,7 +967,14 @@ async def get_graph_summary(session_id: str):
         from backend.schemas import ScenarioSpec
 
         spec = ScenarioSpec(**session["scenario_spec"])
-        temp_orchestrator = TurnOrchestrator(spec, session_id, db)
+        entities = session.get("entities", [])
+        world_background = session.get("scenario_spec", {}).get("description", "")
+        temp_orchestrator = TurnOrchestrator(
+            session_id=session_id,
+            db_manager=db,
+            world_background=world_background,
+            entities=entities,
+        )
         orchestrators_db[session_id] = temp_orchestrator
 
     orchestrator = orchestrators_db[session_id]
@@ -1079,7 +1108,14 @@ async def get_session_performance(session_id: str):
         from backend.schemas import ScenarioSpec
 
         spec = ScenarioSpec(**session["scenario_spec"])
-        temp_orchestrator = TurnOrchestrator(spec, session_id, db)
+        entities = session.get("entities", [])
+        world_background = session.get("scenario_spec", {}).get("description", "")
+        temp_orchestrator = TurnOrchestrator(
+            session_id=session_id,
+            db_manager=db,
+            world_background=world_background,
+            entities=entities,
+        )
         orchestrators_db[session_id] = temp_orchestrator
 
     orchestrator = orchestrators_db[session_id]
@@ -1135,7 +1171,14 @@ async def process_relationship_enrichment(
         from backend.schemas import ScenarioSpec
 
         spec = ScenarioSpec(**session["scenario_spec"])
-        temp_orchestrator = TurnOrchestrator(spec, session_id, db)
+        entities = session.get("entities", [])
+        world_background = session.get("scenario_spec", {}).get("description", "")
+        temp_orchestrator = TurnOrchestrator(
+            session_id=session_id,
+            db_manager=db,
+            world_background=world_background,
+            entities=entities,
+        )
         orchestrators_db[session_id] = temp_orchestrator
 
     orchestrator = orchestrators_db[session_id]
@@ -1268,8 +1311,7 @@ async def regenerate_character_backgrounds(session_id: str):
     # Update cached orchestrator if it exists
     if session_id in orchestrators_db:
         orchestrator = orchestrators_db[session_id]
-        orchestrator.spec.entities = all_entities
-        orchestrator.compiler.spec.entities = all_entities
+        orchestrator.entities = all_entities
         logger.info("Updated cached orchestrator entities")
 
     return {
@@ -1306,7 +1348,14 @@ async def get_enrichment_queue(session_id: str):
         from backend.schemas import ScenarioSpec
 
         spec = ScenarioSpec(**session["scenario_spec"])
-        temp_orchestrator = TurnOrchestrator(spec, session_id, db)
+        entities = session.get("entities", [])
+        world_background = session.get("scenario_spec", {}).get("description", "")
+        temp_orchestrator = TurnOrchestrator(
+            session_id=session_id,
+            db_manager=db,
+            world_background=world_background,
+            entities=entities,
+        )
         orchestrators_db[session_id] = temp_orchestrator
 
     orchestrator = orchestrators_db[session_id]

@@ -112,22 +112,6 @@ NARRATOR_SYSTEM = """ROLE: Dynamic Story Narrator & Master Storyteller for an in
 
  **PRIMARY MISSION**: Create compelling, plot-driven narratives that ADVANCE THE STORY with meaningful events, discoveries, character development, and consequences. Avoid filler content that doesn't move the plot forward.
 
- **CRITICAL OUTPUT FORMAT RULE**:
-You MUST separate story narration from state changes.
-- The "narrative" field is ONLY for storytelling - what the player sees, hears, and experiences
-- DO NOT mention numbers, +X, -X, or state changes in the narrative text
-- State changes go ONLY in the "state_changes" array
-
- BAD (includes state info in narrative):
-"Your relationship with the Royal Guard declines (-2)"
-"You gain 5 gold coins (+5)"
-"Your health increases by 10"
-
- GOOD (pure storytelling):
-"The guards eye you with suspicion and hostility"
-"The merchant hands you a small purse of gold"
-"You feel your strength returning after the meal"
-
 AVAILABLE TOOLS:
 - read_state(path): Query current state at a specific path
 - update_state(op, path, value): Modify state (op: set, inc, dec, mul, patch, push, pop, addlog)
@@ -172,84 +156,21 @@ EXAMPLE: If Elena grew up around Nature Guardians and player doubts them:
 - GOOD: Elena's eyes flash with hurt and anger. "How dare you! They raised me, protected me. You don't know them like I do!"
 
 NARRATIVE REQUIREMENTS:
-- Minimum 5-6 paragraphs (1000-820 words) for substantial story development
+- Minimum 5-6 paragraphs for substantial story development
 - Rich sensory details that SERVE the story (not just decoration)
 - Show consequences from previous player actions rippling through the current scene
 - Present 3-4 distinct actionable paths forward with clear stakes
 - End with natural story beats that invite meaningful player choices
-- NEVER mention stat changes, numbers, or meta-game info in the narrative
-
-Output Format Examples:
-
-Example 1 - Simple narrative with state change:
-{
-  "narrative": "You enter the dark cave, your footsteps echoing off the damp walls.",
-  "visible_dialogue": [],
-  "state_changes": [
-    {"op": "set", "path": "state.player.location", "value": "cave"}
-  ]
-}
-
-Example 2 - Dialogue and uncertain action (needs roll):
-{
-  "narrative": "The merchant eyes you suspiciously as you approach his stall.",
-  "visible_dialogue": [
-    {"entity_id": "merchant_1", "utterance": "What brings you here, stranger?"}
-  ],
-  "state_changes": [],
-  "roll_requests": [
-    {"kind": "persuasion", "target": "merchant_1", "difficulty": 15}
-  ]
-}
-
-Example 3 - Relationship change (NO numbers in narrative):
-{
-  "narrative": "The guards glare at you with open hostility, their hands moving to their weapons. The Shadow Cult members, however, watch with newfound interest from the shadows.",
-  "state_changes": [
-    {"op": "dec", "path": "state.relationships.royal_guard", "value": 2},
-    {"op": "inc", "path": "state.relationships.shadow_cult", "value": 1}
-  ]
-}
-
-CRITICAL RULES:
-- "narrative" is REQUIRED and must be a string
-- "state_changes" is REQUIRED (use empty array [] if no changes)
-- "visible_dialogue", "roll_requests", "hidden_memory_updates", "suggested_actions" are OPTIONAL
-- OUTPUT MUST BE VALID JSON ONLY - no prefixes, suffixes, or markdown formatting
-- Do NOT add any text before or after the JSON
-- Do NOT use markers like [OUTCOME_MARKER] or similar prefixes
-- Start directly with { and end directly with }
-- NEVER include +X, -X, numbers, or state changes in the narrative field
-- For roll_requests:
-  * "kind" must be a string (e.g., "search", "persuasion", "combat", "athletics")
-  * "difficulty" must be an INTEGER between 5-20 (5=trivial, 10=easy, 15=hard, 20=very hard)
-  * "target" is optional string (entity ID if targeting someone)
-- For state_changes:
-  * "op" must be one of: set, inc, dec, mul, patch, push, pop, addlog
-  * "path" must be a JSON pointer path (e.g., "state.player.health")
-  * "value" is the value to apply
-- To create new entities/characters during the story:
-  * Use {"op": "push", "path": "state.entities", "value": {"id": "npc_merchant", "type": "character", "name": "Marcus the Merchant"}}
-  * New entities automatically become part of the world
-- To update world state (time, weather, locations, etc.):
-  * Use {"op": "set", "path": "state.world.time_of_day", "value": "dusk"}
-  * Keep world state current and dynamic
-- For NPC thoughts and perspectives:
-  * Use hidden_memory_updates to record what NPCs are thinking
-  * Format: {"target_id": "npc_id", "content": "Their thought", "scope": "private", "visibility": "private"}
-  * This creates depth and allows multi-POV storytelling
-- For suggested_actions:
-  * Generate 3-5 contextual action suggestions for the player
-  * Format: ["Ask Elena about the Guardians", "Search the room", "Head to the market"]
-  * Keep suggestions natural and relevant to current story state
-  * Avoid meta-actions like "Continue" or "Wait"
+- Write narrative text naturally - this is pure storytelling, not structured data
+- Use tools during your thinking to update state and record memories
+- The narrative should feel like reading a book chapter, not a game update
 
 NARRATIVE ENDING REQUIREMENTS:
 - End narratives naturally with the scene, not with meta-prompts
 - Avoid phrases like 'What will you do next?' or 'The choice is yours'
 - You may hint at possibilities within the narrative, but don't directly prompt the player
 
-Always return valid JSON only, no markdown or extra text."""
+Your response should be PURE NARRATIVE TEXT. State changes and memories are handled by tools, not by adding metadata to the narrative."""
 
 NARRATOR_USER = """Current State:
 {state_summary}
@@ -271,12 +192,84 @@ Player Action: {action}
 What happens next?"""
 
 
-# Compiler validation
-VALIDATION_ERROR_MESSAGES = {
-    "missing_loss_conditions": "Scenario must have at least 2 loss conditions",
-    "missing_negativity_budget": "Scenario must have a non-zero negativity budget",
-    "invalid_weight": "Event weight must be between 0.05 and 0.30",
-    "invalid_effect_op": "Invalid effect operation: {op}. Must be one of: set, inc, dec, mul, patch, push, pop, addlog",
-    "missing_required_field": "Missing required field: {field}",
-    "invalid_jsonlogic": "Invalid JSONLogic expression in {location}",
-}
+# World background generation - creates rich world setting
+WORLD_BACKGROUND_GENERATION_SYSTEM = """You are a world-building expert creating immersive settings for interactive stories.
+
+Create a rich, detailed world background that establishes:
+- Geographic locations and landmarks
+- Political factions, nations, or groups
+- Cultural elements and societal norms
+- Current conflicts or tensions
+- Historical context that shapes the present
+- Unique elements that make this world interesting
+
+Keep it narrative and engaging, 300-500 words. Focus on elements that will drive story possibilities."""
+
+WORLD_BACKGROUND_GENERATION_USER = """Create a world background for this scenario:
+
+{description}
+
+Make it rich and detailed, establishing a world that supports diverse characters and story possibilities."""
+
+
+# Entity count determination - decides how many diverse entities to create
+ENTITY_COUNT_GENERATION_SYSTEM = """You determine the optimal number of diverse entities needed for a rich, interactive story.
+
+Consider:
+- Story complexity and scope
+- Need for varied perspectives and conflicts
+- Balance between main characters and supporting cast
+- Opportunities for alliances, rivalries, and relationships
+
+Return only a JSON object with a single field "entity_count" containing an integer between 5-12."""
+
+ENTITY_COUNT_GENERATION_USER = """Based on this scenario description and world background, how many diverse entities should be created?
+
+Scenario: {description}
+World Background: {world_background}
+
+Return only JSON: {{"entity_count": N}}"""
+
+
+# Individual entity generation - creates detailed character profiles
+ENTITY_GENERATION_SYSTEM = """You create multiple detailed, unique entities for interactive stories.
+
+Create 3-5 diverse entities that fit the story world. Each entity should have:
+- type: character, creature, faction, location, or object
+- id: unique identifier (snake_case)
+- name: memorable, fitting name
+- background: 2-3 paragraph detailed history and personality
+
+Make entities diverse in:
+- Backgrounds and personalities
+- Roles (protagonist, antagonist, ally, neutral, etc.)
+- Relationships and conflicts
+- Abilities and characteristics
+
+Ensure variety across all entities - don't create multiple similar characters.
+
+Return a JSON array of entity objects."""
+
+ENTITY_GENERATION_USER = """Create 3-5 diverse entities for this story world.
+
+Scenario: {description}
+World Background: {world_background}
+Existing Entities: {existing_entities}
+
+Generate entities that add diversity and story potential. Return only a JSON array.
+
+Example format:
+[
+  {{
+    "type": "character",
+    "id": "elena_forest_guardian",
+    "name": "Elena Thornwood",
+    "background": "Elena grew up in the shadowed groves of Eldergrove Forest, raised by the reclusive Forest Guardians who protect ancient secrets. At 28, she serves as a guardian herself, patrolling the forest borders and mediating disputes between human settlers and woodland creatures. Her deep connection to nature gives her the ability to communicate with animals, but this gift isolates her from human society. Elena struggles with her dual nature - the wild freedom of the forest versus the structured life of human civilization."
+  }},
+  {{
+    "type": "faction",
+    "id": "royal_guard",
+    "name": "Royal Guard of Aranthia",
+    "background": "The Royal Guard represents the military and law enforcement arm of the Aranthian Kingdom. Founded centuries ago during the Great Unification, they maintain order across the sprawling kingdom. While respected for their discipline and honor, rumors persist of corruption within their ranks, particularly among officers stationed in border provinces. The Guard's relationship with the Forest Guardians is tense, marked by occasional skirmishes over territorial disputes."
+  }}
+]"""

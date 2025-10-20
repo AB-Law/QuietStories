@@ -160,6 +160,7 @@ class TestLanggraphPerformance:
                     "memory_state": perf_orchestrator._get_memory_state_snapshot(),
                     "error_recovery_active": False,
                     "error_context": None,
+                    "final_narrative": None,
                 }
 
             creation_time = time.time() - start_time
@@ -203,6 +204,7 @@ class TestLanggraphPerformance:
             "memory_state": {"snapshot_data": list(range(100))},
             "error_recovery_active": False,
             "error_context": None,
+            "final_narrative": None,
         }
 
         # Test routing performance under load
@@ -252,6 +254,7 @@ class TestLanggraphPerformance:
                 "memory_state": None,
                 "error_recovery_active": False,
                 "error_context": None,
+                "final_narrative": None,
             }
 
             # Measure analysis time
@@ -409,6 +412,7 @@ class TestLanggraphPerformance:
                     "memory_state": None,
                     "error_recovery_active": False,
                     "error_context": None,
+                    "final_narrative": None,
                 }
                 config = {"configurable": {"thread_id": f"thread_{i}"}}
                 tasks.append(perf_orchestrator.graph.ainvoke(state, config))
@@ -456,6 +460,7 @@ class TestLanggraphPerformance:
                 "memory_state": None,
                 "error_recovery_active": False,
                 "error_context": None,
+                "final_narrative": None,
             }
 
             # Test routing performance with different state sizes
@@ -538,6 +543,7 @@ class TestPerformanceRegression:
                         "memory_state": None,
                         "error_recovery_active": False,
                         "error_context": None,
+                        "final_narrative": None,
                     }
 
                     # Test various operations
