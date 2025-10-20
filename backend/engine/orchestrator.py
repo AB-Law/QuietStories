@@ -106,6 +106,7 @@ class AgentState(TypedDict):
     memory_state: Optional[Dict[str, Any]]  # Memory manager state snapshot
     error_recovery_active: Optional[bool]  # Whether error recovery is active
     error_context: Optional[Dict[str, Any]]  # Error context for recovery
+    final_narrative: Optional[str]  # Final extracted narrative for outcome
 
 
 class TurnOrchestrator:
@@ -126,21 +127,41 @@ class TurnOrchestrator:
         _session_ref: Reference to fetch turn history
     """
 
-    def __init__(self, spec: ScenarioSpec, session_id: str, db_manager=None):
+    def __init__(
+        self,
+        session_id: str = "",
+        db_manager: Optional[DatabaseManager] = None,
+        world_background: str = "",
+        entities: Optional[List[Dict[str, Any]]] = None,
+    ):
         """
         Initialize the turn orchestrator.
 
         Args:
-            spec: Scenario specification defining game rules
             session_id: Unique session identifier
             db_manager: Database manager for persistence (optional)
+            world_background: World background text
+            entities: List of entities in the scenario
         """
-        self.spec = spec
         self.session_id = session_id
         self.db_manager = db_manager
+        self.world_background = world_background
+        self.entities = entities or []
+
+        # Initialize state directly instead of using spec
+        self.state = {
+            "turn": 0,
+            "player": {"health": 100},
+            "world": {"time_of_day": "morning", "day": 1},
+        }
+        self.actions: List[Dict[str, Any]] = []  # Empty actions - handled by tools
+        self.random_events: List[Dict[str, Any]] = []
+        self.loss_conditions: List[Dict[str, Any]] = []
+        self.negativity_budget = {"min_fail_rate": 0.25, "decay_per_turn": {}}
+
         self.provider = create_provider()
-        self.compiler = ScenarioCompiler(spec)
-        self.compiler._orchestrator = self  # type: ignore # Give compiler access to orchestrator
+        self.compiler = ScenarioCompiler(self)
+        self.compiler.orchestrator = self  # type: ignore # Give compiler access to orchestrator
 
         # Load memory from database if available
         private_memory = {}
@@ -879,8 +900,8 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
         result = {
             "messages": [assistant_message],
             "context": fresh_context,
-            "game_state": self.spec.state,  # Keep state synchronized
-            "entities": self.spec.entities,
+            "game_state": self.state,  # Keep state synchronized
+            "entities": self.entities,
         }
 
         # End performance tracking
@@ -1038,15 +1059,23 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
 
             # Extract tool call IDs and categorize tools for optimization
             tool_call_ids = []
+            tool_calls_info = []  # Track tool names and IDs together
             read_only_count = 0
             write_count = 0
 
             if hasattr(last_message, "tool_calls") and last_message.tool_calls:
                 tool_call_ids = [tc["id"] for tc in last_message.tool_calls]
 
-                # Categorize tools
+                # Categorize tools and capture details
                 for tc in last_message.tool_calls:
                     tool_name = tc.get("name", "unknown")
+                    tool_id = tc.get("id", "no-id")
+                    tool_args = tc.get("args", {})
+
+                    tool_calls_info.append(
+                        {"name": tool_name, "id": tool_id, "args": tool_args}
+                    )
+
                     if tool_name in READ_ONLY_TOOLS:
                         read_only_count += 1
                     elif tool_name in WRITE_TOOLS:
@@ -1055,8 +1084,21 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
                 logger.debug(
                     f"[Tools] Executing {len(tool_call_ids)} tools: {read_only_count} read-only, {write_count} write tools"
                 )
+
+                # Log detailed tool information
+                for i, tool_info in enumerate(tool_calls_info):
+                    logger.info(
+                        f"[Tools] Tool {i+1}/{len(tool_calls_info)}: {tool_info['name']} (id: {tool_info['id']}) - args: {tool_info['args']}",
+                        extra={
+                            "tool_index": i,
+                            "tool_name": tool_info["name"],
+                            "tool_id": tool_info["id"],
+                            "tool_args": tool_info["args"],
+                        },
+                    )
+
                 self._verbose_log(
-                    f"About to execute {len(tool_call_ids)} tools: {tool_call_ids}"
+                    f"About to execute {len(tool_call_ids)} tools: {[t['name'] for t in tool_calls_info]}"
                 )
 
             # Use standard ToolNode but with error wrapping
@@ -1091,17 +1133,22 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
                 execution_time_ms / len(tool_call_ids) if tool_call_ids else 0
             )
 
+            # Build tool names list for logging
+            tool_names = [t["name"] for t in tool_calls_info] if tool_calls_info else []
+
             logger.info(
                 f"[Tools] Executed {len(tool_call_ids)} tools in {execution_time:.3f}s (avg: {avg_time_per_tool:.1f}ms/tool)",
                 extra={
                     "component": "Performance",
                     "execution_id": execution_id,
                     "tool_count": len(tool_call_ids),
+                    "tool_names": tool_names,
                     "read_only_count": read_only_count,
                     "write_count": write_count,
                     "duration_ms": execution_time_ms,
                     "avg_time_per_tool_ms": avg_time_per_tool,
                     "tool_ids": tool_call_ids,
+                    "tools_executed": tool_calls_info,
                 },
             )
 
@@ -1137,14 +1184,19 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
                     f"Creating error responses for {len(last_ai_message.tool_calls)} tool calls"
                 )
                 for tool_call in last_ai_message.tool_calls:
+                    # Extract tool name - try 'name' first, then 'function.name'
+                    tool_name = tool_call.get("name")
+                    if not tool_name:
+                        tool_name = tool_call.get("function", {}).get("name", "unknown")
+
                     error_message = ToolMessage(
                         content=f"Tool execution error: {str(e)}",
                         tool_call_id=tool_call["id"],
-                        name=tool_call.get("function", {}).get("name", "unknown"),
+                        name=tool_name,
                     )
                     error_messages.append(error_message)
                     self._verbose_log(
-                        f"Created error response for tool call {tool_call['id']}"
+                        f"Created error response for tool call {tool_call['id']} ({tool_name})"
                     )
             else:
                 # Fallback error message
@@ -1314,49 +1366,40 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
 
     async def _generate_outcome(self, state: AgentState) -> Dict[str, Any]:
         """
-        Generate final structured outcome from agent reasoning.
+        Generate final narrative outcome from agent reasoning.
+
+        Pure storytelling approach - the LLM should generate narrative text naturally,
+        with all state changes handled by tools (add_memory, update_state, etc.)
+        during the conversation flow.
 
         Args:
             state: Current agent state
 
         Returns:
-            Updated state with structured outcome
+            Updated state with narrative outcome
         """
-        logger.debug("[Outcome] Generating structured outcome")
+        logger.debug("[Outcome] Generating final narrative")
 
-        # Add request for structured outcome
+        # Just get the last message - it should contain the narrative
         messages = state["messages"]
-        messages.append(
-            HumanMessage(
-                content="Now provide the final narrative outcome as structured JSON with the Outcome schema."
-            )
-        )
 
-        # Validate message sequence before final call
-        validated_messages = self._validate_message_sequence(messages)
+        if not messages:
+            logger.warning("[Outcome] No messages found in state")
+            return {"final_narrative": ""}
 
-        # Get structured response
-        logger.debug("[Outcome] Requesting structured JSON response from LLM...")
-        final_response = await self.provider.chat(
-            messages=validated_messages, json_schema=self._get_outcome_schema()
-        )
+        last_message = messages[-1]
+        narrative_text = _get_message_content_as_string(last_message)
 
-        logger.debug(
-            f"[Outcome] LLM response content length: {len(final_response.content or '')}"
-        )
-        logger.debug(
-            f"[Outcome] LLM response preview: {(final_response.content or '')[:200]}..."
-        )
+        logger.debug(f"[Outcome] Final narrative length: {len(narrative_text)} chars")
+        logger.debug(f"[Outcome] Narrative preview: {narrative_text[:200]}...")
 
         # Store conversation history in state for persistence
         conversation_summary = self._summarize_conversation(messages)
 
-        # Return the structured response as an AIMessage for proper parsing
-        # No longer need the OUTCOME_MARKER prefix - the JSON structure is clear enough
-        outcome_message = AIMessage(content=final_response.content or "")
-
+        # Return the narrative in state without adding new messages
+        # process_turn will extract this from the final state
         return {
-            "messages": [outcome_message],
+            "final_narrative": narrative_text,
             "conversation_summary": conversation_summary,
         }
 
@@ -1428,8 +1471,8 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
                 SystemMessage(content=self._get_system_prompt()),
                 HumanMessage(content=self._get_user_prompt(context, user_input)),
             ],
-            "game_state": self.spec.state,
-            "entities": self.spec.entities,
+            "game_state": self.state,
+            "entities": self.entities,
             "session_id": self.session_id,
             "turn_count": self.memory.get_turn_count(),
             "tool_results": [],
@@ -1439,6 +1482,7 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
             "memory_state": self._get_memory_state_snapshot(),
             "error_recovery_active": False,
             "error_context": None,
+            "final_narrative": None,
         }
 
         self._log_message_sequence(
@@ -1468,61 +1512,27 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
                 final_state["messages"], "Final state messages after graph execution"
             )
 
-            # Extract the final response for outcome parsing
-            messages = final_state["messages"]
-            final_message = None
+            # Extract the final narrative from state
+            # The outcome node extracted it and stored it in final_state["final_narrative"]
+            final_narrative = final_state.get("final_narrative", "")
 
-            # Find the outcome message first, then fall back to last assistant message with content
-            logger.debug(f"[Orchestrator] Examining {len(messages)} final messages")
-
-            # First pass: look for messages with JSON outcome structure
-            for i, msg in enumerate(reversed(messages)):
-                content = _get_message_content_as_string(msg)
-                logger.debug(
-                    f"[Orchestrator] Message {len(messages)-1-i}: {type(msg).__name__} - content length: {len(content)} - checking for JSON structure"
+            if not final_narrative or not final_narrative.strip():
+                logger.warning(
+                    "[Orchestrator] No final narrative found in state, using fallback"
                 )
-
-                # Check if this looks like a JSON outcome (has narrative field and proper structure)
-                if content.strip() and self._is_outcome_message(content):
-                    final_message = msg
-                    logger.info(
-                        f"[Orchestrator] Selected OUTCOME message: {type(msg).__name__} with {len(content)} chars"
-                    )
-                    logger.debug(
-                        f"[Orchestrator] Outcome message content preview: {content[:200]}..."
-                    )
-                    break
-
-            # Second pass: fall back to any message with content if no outcome message found
-            if not final_message:
-                logger.debug(
-                    "[Orchestrator] No outcome marker found, falling back to last message with content"
-                )
-                for i, msg in enumerate(reversed(messages)):
-                    if hasattr(msg, "content") and msg.content and msg.content.strip():
-                        final_message = msg
-                        logger.info(
-                            f"[Orchestrator] Selected FALLBACK message: {type(msg).__name__} with {len(msg.content)} chars"
-                        )
-                        logger.debug(
-                            f"[Orchestrator] Fallback message content preview: {msg.content[:200]}..."
-                        )
-                        break
-
-            if not final_message:
-                logger.warning("[Orchestrator] No final message found, using fallback")
                 outcome = Outcome(
                     narrative="The story continues...",
                     state_changes=[],
-                    visible_dialogue=None,
-                    roll_requests=None,
-                    hidden_memory_updates=None,
-                    emotional_state_updates=None,
-                    suggested_actions=None,
                 )
             else:
-                # Parse outcome from final message
-                outcome = self._parse_outcome(final_message.content)
+                logger.info(
+                    f"[Orchestrator] Extracted narrative: {len(final_narrative)} chars"
+                )
+                # Create outcome from pure narrative text (tools handled state changes)
+                outcome = Outcome(
+                    narrative=final_narrative,
+                    state_changes=[],  # State changes were handled by tools during conversation
+                )
 
         except Exception as e:
             logger.error(f"[Orchestrator] Langgraph execution failed: {e}")
@@ -1555,15 +1565,10 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
                 except Exception as log_error:
                     self._verbose_log(f"Failed to log partial state: {log_error}")
 
-            # Fallback to minimal outcome
+            # Fallback to minimal outcome with just narrative
             outcome = Outcome(
                 narrative="The story continues...",
                 state_changes=[],
-                visible_dialogue=None,
-                roll_requests=None,
-                hidden_memory_updates=None,
-                emotional_state_updates=None,
-                suggested_actions=None,
             )
 
         # Apply state changes and update memory (existing logic)
@@ -1867,8 +1872,8 @@ IMPORTANT: Use ONLY tool calls to update memories. Do NOT provide any textual re
             world_background = self._session_ref["world_background"]
 
         return {
-            "state": self.spec.state,
-            "entities": self.spec.entities,
+            "state": self.state,
+            "entities": self.entities,
             "recent_turns": recent_turns,
             "history_summary": history_summary,
             "private_memory": private_memory,
@@ -2206,7 +2211,7 @@ Summary:"""
 
         Note:
             Handles both Pydantic StateChange objects and plain dicts
-            for flexibility. Updates self.spec.state in place.
+            for flexibility. Updates self.state in place.
         """
         for change in state_changes:
             try:
@@ -2256,7 +2261,7 @@ Summary:"""
                             logger.info(f"New entity created: {entity_id}")
                             # Also update spec.entities if it's the main entities list
                             if path.endswith("entities") and isinstance(value, dict):
-                                self.spec.entities.append(value)
+                                self.entities.append(value)
                 elif op == "pop":
                     current_value = self._get_value_at_path(path)
                     if isinstance(current_value, list) and len(current_value) > 0:
@@ -2279,11 +2284,11 @@ Summary:"""
     def _get_value_at_path(self, path: str) -> Any:
         """Get value at JSON pointer path"""
         if not path or path == "":
-            return self.spec.state
+            return self.state
 
         # Simple path resolution - in production, use proper JSON pointer library
         parts = path.split(".")
-        current: Any = self.spec.state
+        current: Any = self.state
 
         for part in parts:
             if part.startswith("[") and part.endswith("]"):
@@ -2298,12 +2303,12 @@ Summary:"""
     def _set_value_at_path(self, path: str, value: Any):
         """Set value at JSON pointer path"""
         if not path or path == "":
-            self.spec.state = value
+            self.state = value
             return
 
         # Simple path resolution - in production, use proper JSON pointer library
         parts = path.split(".")
-        current: Any = self.spec.state
+        current: Any = self.state
 
         for i, part in enumerate(parts[:-1]):
             if part.startswith("[") and part.endswith("]"):
@@ -2466,27 +2471,27 @@ Summary:"""
             - Legacy "player" entity
         """
         # Check if there's a POV marker in state
-        if hasattr(self.spec, "state") and isinstance(self.spec.state, dict):
-            pov = self.spec.state.get("pov_entity")
+        if hasattr(self, "state") and isinstance(self.state, dict):
+            pov = self.state.get("pov_entity")
             if pov:
-                return pov
+                return str(pov)
 
         # Check if there's a player entity in entities list
-        if self.spec.entities:
+        if self.entities:
             # First, look for player_character (created by initializer with user's name)
-            for entity in self.spec.entities:
+            for entity in self.entities:
                 if entity.get("id") == "player_character":
-                    return entity.get("id", "player_character")
+                    return str(entity.get("id", "player_character"))
 
             # Then look for explicit player type entities
-            for entity in self.spec.entities:
+            for entity in self.entities:
                 if entity.get("type") == "player":
-                    return entity.get("id", "player")
+                    return str(entity.get("id", "player"))
 
             # Finally, look for legacy "player" id
-            for entity in self.spec.entities:
+            for entity in self.entities:
                 if entity.get("id") == "player":
-                    return entity.get("id", "player")
+                    return str(entity.get("id", "player"))
 
         # Default to "player"
         return "player"
@@ -2498,19 +2503,11 @@ Summary:"""
         Returns:
             List of action ID strings filtered by preconditions
 
-        Filters actions based on:
-        - Preconditions against current state
-        - Location/context restrictions
-        - Entity capabilities
+        Note: Actions are no longer used in the simplified architecture.
+        This method returns an empty list for compatibility.
         """
-        available = []
-
-        for action in self.spec.actions:
-            if self._check_preconditions(action.preconditions, self.spec.state):
-                available.append(action.id)
-
-        logger.debug(f"Available actions: {available}")
-        return available
+        # Actions are no longer part of the simplified architecture
+        return []
 
     def _check_preconditions(
         self, preconditions: Dict[str, Any], state: Dict[str, Any]
@@ -2639,7 +2636,7 @@ Summary:"""
             return {"modifier": 0}
 
         # Look for character in entities
-        for entity in self.spec.entities:
+        for entity in self.entities:
             if entity.get("id") == entity_id:
                 stats = entity.get("stats", {})
                 return {
@@ -2787,10 +2784,10 @@ Summary:"""
 
         # Get entity names for better analysis
         entity_names = []
-        if hasattr(self.spec, "entities") and self.spec.entities:
+        if hasattr(self, "entities") and self.entities:
             entity_names = [
                 entity.get("name", entity.get("id", ""))
-                for entity in self.spec.entities
+                for entity in self.entities
                 if entity.get("name") or entity.get("id")
             ]
 
@@ -2944,7 +2941,7 @@ IMPORTANT:
             return True
 
         # Check if we have entities but no relationships tracked
-        entity_count = len(self.spec.entities) if self.spec.entities else 0
+        entity_count = len(self.entities) if self.entities else 0
         relationship_count = len(self.memory.get_relationship_summary())
 
         if entity_count >= 3 and relationship_count == 0 and turn_count >= 3:

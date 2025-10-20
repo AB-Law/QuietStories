@@ -156,9 +156,8 @@ export function Chat() {
 
     setIsCreatingSession(true);
     try {
-      // Generate and compile scenario
+      // Generate scenario (world background + entities)
       const scenario = await apiService.generateScenario(scenarioDescription);
-      await apiService.compileScenario(scenario.id);
 
       // Create session with config
       const sessionResponse = await apiService.createSession({

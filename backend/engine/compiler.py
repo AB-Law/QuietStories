@@ -18,8 +18,8 @@ logger = get_logger(__name__)
 class ScenarioCompiler:
     """Compiles scenario specifications into executable tools"""
 
-    def __init__(self, spec: ScenarioSpec):
-        self.spec = spec
+    def __init__(self, orchestrator):
+        self.orchestrator = orchestrator
         self.tools: List[BaseTool] = []
         self._compile_utility_tools()
 
@@ -64,12 +64,12 @@ class ScenarioCompiler:
                 try:
                     # Get the compiler instance
                     compiler = getattr(self, "_compiler", None)
-                    if not compiler or not hasattr(compiler, "spec"):
-                        return "Error: No state available"
+                    if not compiler or not hasattr(compiler, "orchestrator"):
+                        return "Error: No orchestrator available"
 
                     # Simple path resolution
                     parts = path.split(".")
-                    current = compiler.spec.state
+                    current = compiler.orchestrator.state
 
                     for part in parts:
                         if part.startswith("[") and part.endswith("]"):
@@ -113,8 +113,8 @@ class ScenarioCompiler:
                 """Update state with the given operation"""
                 try:
                     compiler = getattr(self, "_compiler", None)
-                    if not compiler or not hasattr(compiler, "spec"):
-                        return "Error: No state available"
+                    if not compiler or not hasattr(compiler, "orchestrator"):
+                        return "Error: No orchestrator available"
 
                     # Apply the state change
                     if op == "set":
@@ -184,11 +184,11 @@ class ScenarioCompiler:
                 """Create a new character"""
                 try:
                     compiler = getattr(self, "_compiler", None)
-                    if not compiler or not hasattr(compiler, "spec"):
-                        return "Error: No state available"
+                    if not compiler or not hasattr(compiler, "orchestrator"):
+                        return "Error: No orchestrator available"
 
                     # Check if entity already exists
-                    for entity in compiler.spec.entities:
+                    for entity in compiler.orchestrator.entities:
                         if entity.get("id") == id:
                             return f"Error: Character with id '{id}' already exists. Use their existing id instead of creating a duplicate."
 
@@ -198,9 +198,9 @@ class ScenarioCompiler:
                         entity_data["background"] = background
 
                     # Add to entities list
-                    compiler.spec.entities.append(entity_data)
+                    compiler.orchestrator.entities.append(entity_data)
                     logger.info(
-                        f"[CharacterCreation] Added new character '{name}' (id: {id}) to spec.entities. Total entities: {len(compiler.spec.entities)}"
+                        f"[CharacterCreation] Added new character '{name}' (id: {id}) to orchestrator.entities. Total entities: {len(compiler.orchestrator.entities)}"
                     )
 
                     # Also add to state.entities if it exists
@@ -247,8 +247,8 @@ class ScenarioCompiler:
                 """Update world state with any key-value pairs"""
                 try:
                     compiler = getattr(self, "_compiler", None)
-                    if not compiler or not hasattr(compiler, "spec"):
-                        return "Error: No state available"
+                    if not compiler or not hasattr(compiler, "orchestrator"):
+                        return "Error: No orchestrator available"
 
                     if not kwargs:
                         return "No changes provided"
@@ -296,23 +296,20 @@ class ScenarioCompiler:
                 """Add memory for entity with optional scope"""
                 try:
                     compiler = getattr(self, "_compiler", None)
-                    if not compiler or not hasattr(compiler, "_orchestrator"):
+                    if not compiler or not hasattr(compiler, "orchestrator"):
                         return "Error: No orchestrator available"
 
-                    orchestrator = compiler._orchestrator
+                    orchestrator = compiler.orchestrator
 
                     # Determine related entities for relationship memories
                     related_entities = []
                     if scope == "relationship":
                         # Extract potential entity names from content
                         entity_names = []
-                        if (
-                            hasattr(orchestrator.spec, "entities")
-                            and orchestrator.spec.entities
-                        ):
+                        if hasattr(orchestrator, "entities") and orchestrator.entities:
                             entity_names = [
                                 e.get("name", e.get("id", ""))
-                                for e in orchestrator.spec.entities
+                                for e in orchestrator.entities
                                 if e.get("name") or e.get("id")
                             ]
 
@@ -374,10 +371,10 @@ class ScenarioCompiler:
                 """Search memories semantically"""
                 try:
                     compiler = getattr(self, "_compiler", None)
-                    if not compiler or not hasattr(compiler, "_orchestrator"):
+                    if not compiler or not hasattr(compiler, "orchestrator"):
                         return "Error: No orchestrator available"
 
-                    orchestrator = compiler._orchestrator
+                    orchestrator = compiler.orchestrator
 
                     # Search memories
                     results = orchestrator.memory.search_memories_semantic(
@@ -444,10 +441,10 @@ class ScenarioCompiler:
                 """Add multiple memories at once"""
                 try:
                     compiler = getattr(self, "_compiler", None)
-                    if not compiler or not hasattr(compiler, "_orchestrator"):
+                    if not compiler or not hasattr(compiler, "orchestrator"):
                         return "Error: No orchestrator available"
 
-                    orchestrator = compiler._orchestrator
+                    orchestrator = compiler.orchestrator
                     results = []
 
                     for memory in memories:
@@ -546,10 +543,10 @@ class ScenarioCompiler:
     def _get_value_at_path(self, path: str) -> Any:
         """Get value at JSON pointer path"""
         if not path or path == "":
-            return self.spec.state
+            return self.orchestrator.state
 
         parts = path.split(".")
-        current = self.spec.state
+        current = self.orchestrator.state
 
         for part in parts:
             if part.startswith("[") and part.endswith("]"):
@@ -570,11 +567,11 @@ class ScenarioCompiler:
     def _set_value_at_path(self, path: str, value: Any):
         """Set value at JSON pointer path"""
         if not path or path == "":
-            self.spec.state = value  # type: ignore
+            self.orchestrator.state = value  # type: ignore
             return
 
         parts = path.split(".")
-        current: Any = self.spec.state
+        current: Any = self.orchestrator.state
 
         for i, part in enumerate(parts[:-1]):
             if part.startswith("[") and part.endswith("]"):

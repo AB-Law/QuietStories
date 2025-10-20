@@ -68,22 +68,25 @@ class Outcome(BaseModel):
 
     narrative: str = Field(..., description="Visible narration text")
     visible_dialogue: Optional[List[VisibleDialogue]] = Field(
-        None, description="Visible dialogue between entities"
+        default=None, description="Visible dialogue between entities"
     )
     state_changes: List[StateChange] = Field(
-        ..., description="List of state changes to apply"
+        default_factory=list, description="List of state changes to apply"
+    )
+    state_changes_summary: Optional[List[str]] = Field(
+        default=None, description="Human-readable summary of state changes"
     )
     roll_requests: Optional[List[RollRequest]] = Field(
-        None, description="Dice roll requests"
+        default=None, description="Dice roll requests"
     )
     hidden_memory_updates: Optional[List[HiddenMemoryUpdate]] = Field(
-        None, description="Hidden memory updates"
+        default=None, description="Hidden memory updates"
     )
     emotional_state_updates: Optional[List[EmotionalStateUpdate]] = Field(
-        None, description="Emotional state updates for entities"
+        default=None, description="Emotional state updates for entities"
     )
     suggested_actions: Optional[List[str]] = Field(
-        None, description="Suggested actions for the player to take next"
+        default=None, description="Suggested actions for the player to take next"
     )
 
     class Config:

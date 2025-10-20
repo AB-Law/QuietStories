@@ -75,10 +75,6 @@ class TestLanggraphPerformance:
         # Mock scenario spec to avoid validation complexity
         from unittest.mock import MagicMock
 
-        mock_spec = MagicMock()
-        mock_spec.state = performance_scenario["state"]
-        mock_spec.entities = performance_scenario["entities"]
-
         with patch("backend.engine.orchestrator.create_provider") as mock_provider:
             # Mock provider with realistic response times
             mock_provider.return_value.chat = AsyncMock(
@@ -86,8 +82,18 @@ class TestLanggraphPerformance:
             )
 
             orchestrator = TurnOrchestrator.__new__(TurnOrchestrator)
-            orchestrator.spec = mock_spec
             orchestrator.session_id = "perf_test_session"
+            orchestrator.db_manager = None
+            orchestrator.world_background = "Test World"
+            orchestrator.state = performance_scenario["state"]
+            orchestrator.entities = performance_scenario["entities"]
+            orchestrator.actions = []
+            orchestrator.random_events = []
+            orchestrator.loss_conditions = []
+            orchestrator.negativity_budget = {
+                "min_fail_rate": 0.25,
+                "decay_per_turn": {},
+            }
             orchestrator.memory = MagicMock()
             orchestrator.memory.get_turn_count.return_value = 1
             orchestrator.graph = MagicMock()
@@ -149,8 +155,8 @@ class TestLanggraphPerformance:
                         SystemMessage(content="System prompt"),
                         HumanMessage(content="User input"),
                     ],
-                    "game_state": perf_orchestrator.spec.state,
-                    "entities": perf_orchestrator.spec.entities,
+                    "game_state": perf_orchestrator.state,
+                    "entities": perf_orchestrator.entities,
                     "session_id": perf_orchestrator.session_id,
                     "turn_count": perf_orchestrator.memory.get_turn_count(),
                     "tool_results": [],
@@ -160,6 +166,7 @@ class TestLanggraphPerformance:
                     "memory_state": perf_orchestrator._get_memory_state_snapshot(),
                     "error_recovery_active": False,
                     "error_context": None,
+                    "final_narrative": None,
                 }
 
             creation_time = time.time() - start_time
@@ -186,8 +193,8 @@ class TestLanggraphPerformance:
                 AIMessage(content=f"Message {i} with complex content analysis required")
                 for i in range(20)
             ],
-            "game_state": perf_orchestrator.spec.state,  # Contains 100 entities
-            "entities": perf_orchestrator.spec.entities,  # 50 entities
+            "game_state": perf_orchestrator.state,  # Contains 100 entities
+            "entities": perf_orchestrator.entities,  # 50 entities
             "session_id": "perf_test",
             "turn_count": 15,
             "tool_results": [
@@ -203,6 +210,7 @@ class TestLanggraphPerformance:
             "memory_state": {"snapshot_data": list(range(100))},
             "error_recovery_active": False,
             "error_context": None,
+            "final_narrative": None,
         }
 
         # Test routing performance under load
@@ -252,6 +260,7 @@ class TestLanggraphPerformance:
                 "memory_state": None,
                 "error_recovery_active": False,
                 "error_context": None,
+                "final_narrative": None,
             }
 
             # Measure analysis time
@@ -409,6 +418,7 @@ class TestLanggraphPerformance:
                     "memory_state": None,
                     "error_recovery_active": False,
                     "error_context": None,
+                    "final_narrative": None,
                 }
                 config = {"configurable": {"thread_id": f"thread_{i}"}}
                 tasks.append(perf_orchestrator.graph.ainvoke(state, config))
@@ -456,6 +466,7 @@ class TestLanggraphPerformance:
                 "memory_state": None,
                 "error_recovery_active": False,
                 "error_context": None,
+                "final_narrative": None,
             }
 
             # Test routing performance with different state sizes
@@ -521,14 +532,19 @@ class TestPerformanceRegression:
             )
 
             with patch("backend.engine.orchestrator.create_provider"):
-                orchestrator = TurnOrchestrator(spec, f"mem_session_{i}")
+                orchestrator = TurnOrchestrator(
+                    session_id=f"mem_session_{i}",
+                    db_manager=None,
+                    world_background=spec.name,
+                    entities=spec.entities,
+                )
 
                 # Create some states and summaries
                 for j in range(5):
                     state: AgentState = {
                         "messages": [HumanMessage(content=f"Test {j}")],
-                        "game_state": spec.state,
-                        "entities": spec.entities,
+                        "game_state": orchestrator.state,
+                        "entities": orchestrator.entities,
                         "session_id": f"mem_session_{i}",
                         "turn_count": j,
                         "tool_results": [],
@@ -538,6 +554,7 @@ class TestPerformanceRegression:
                         "memory_state": None,
                         "error_recovery_active": False,
                         "error_context": None,
+                        "final_narrative": None,
                     }
 
                     # Test various operations

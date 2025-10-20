@@ -73,33 +73,31 @@ async def generate_scenario(request: ScenarioGenerateRequest):
         )
 
         logger.info("Starting scenario generation...")
-        scenario_spec = await generator.generate_scenario(request.description)
+        scenario_data = await generator.generate_scenario(request.description)
 
-        logger.info(f"✓ Scenario generated successfully: {scenario_spec.name}")
-        logger.debug(f"Spec version: {scenario_spec.spec_version}")
+        logger.info(f"✓ Scenario generated successfully")
         logger.debug(
-            f"Number of actions: {len(scenario_spec.actions) if scenario_spec.actions else 0}"
+            f"World background length: {len(scenario_data.get('world_background', ''))}"
         )
-        logger.debug(
-            f"Number of entities: {len(scenario_spec.entities) if scenario_spec.entities else 0}"
-        )
+        logger.debug(f"Number of entities: {len(scenario_data.get('entities', []))}")
 
         # Store the scenario in database
         scenario_id = str(uuid.uuid4())
-        scenario_data = {
+        scenario_name = f"Scenario {scenario_id[:8]}"
+        scenario_data_db = {
             "id": scenario_id,
-            "name": scenario_spec.name,
-            "spec": scenario_spec.dict(),
+            "name": scenario_name,  # Simple name since we don't have spec.name
+            "spec": scenario_data,  # Store the simplified data
             "status": "generated",
         }
-        db.save_scenario(scenario_data)
+        db.save_scenario(scenario_data_db)
         logger.info(f"Scenario stored with ID: {scenario_id}")
         logger.debug("Scenario saved to database")
 
         return ScenarioGenerateResponse(
             id=scenario_id,
-            name=scenario_spec.name,
-            spec_version=scenario_spec.spec_version,
+            name=scenario_name,
+            spec_version="1.0",
             status="generated",
         )
 

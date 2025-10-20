@@ -105,8 +105,8 @@ def test_outcome_validation():
 def test_outcome_validation_failures():
     """Test outcome validation failures"""
 
-    # Missing required fields
-    invalid_outcome = {"narrative": "Test"}
+    # Missing required narrative field
+    invalid_outcome = {"state_changes": []}
 
     with pytest.raises(ValueError):
         validate_outcome(invalid_outcome)

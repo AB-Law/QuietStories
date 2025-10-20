@@ -56,7 +56,10 @@ class TestLanggraphAgentToolUsage:
         with patch("backend.engine.orchestrator.create_provider") as mock_provider:
             mock_provider.return_value = AsyncMock()
             orchestrator = TurnOrchestrator(
-                spec=mock_scenario_spec, session_id="test_session", db_manager=None
+                session_id="test_session",
+                db_manager=None,
+                world_background=mock_scenario_spec.name,
+                entities=mock_scenario_spec.entities,
             )
             return orchestrator
 
@@ -76,6 +79,7 @@ class TestLanggraphAgentToolUsage:
             "memory_state": {"turn_count": 1},
             "error_recovery_active": False,
             "error_context": None,
+            "final_narrative": None,
         }
 
         # Verify all fields are accessible
@@ -99,6 +103,7 @@ class TestLanggraphAgentToolUsage:
             "memory_state": None,
             "error_recovery_active": False,
             "error_context": None,
+            "final_narrative": None,
         }
 
         context = orchestrator._build_context_from_state(state)
@@ -128,6 +133,7 @@ class TestLanggraphAgentToolUsage:
             "memory_state": None,
             "error_recovery_active": False,
             "error_context": None,
+            "final_narrative": None,
         }
 
         assert orchestrator._should_continue(state_with_tools) == "tools"
@@ -146,6 +152,7 @@ class TestLanggraphAgentToolUsage:
             "memory_state": None,
             "error_recovery_active": False,
             "error_context": None,
+            "final_narrative": None,
         }
 
         assert orchestrator._should_continue(state_max_rounds) == "outcome"
@@ -167,6 +174,7 @@ class TestLanggraphAgentToolUsage:
             "memory_state": None,
             "error_recovery_active": False,
             "error_context": None,
+            "final_narrative": None,
         }
 
         assert orchestrator._should_continue(state_narrative) == "outcome"
@@ -190,6 +198,7 @@ class TestLanggraphAgentToolUsage:
             "memory_state": None,
             "error_recovery_active": False,
             "error_context": None,
+            "final_narrative": None,
         }
 
         assert orchestrator._check_for_errors(state_with_errors) == "error"
@@ -211,6 +220,7 @@ class TestLanggraphAgentToolUsage:
             "memory_state": None,
             "error_recovery_active": False,
             "error_context": None,
+            "final_narrative": None,
         }
 
         assert orchestrator._check_for_errors(state_no_errors) == "process"
@@ -236,6 +246,7 @@ class TestLanggraphAgentToolUsage:
             "memory_state": None,
             "error_recovery_active": False,
             "error_context": None,
+            "final_narrative": None,
         }
 
         analysis = orchestrator._analyze_tool_usage(tool_messages, state)
@@ -335,6 +346,7 @@ class TestLanggraphAgentToolUsage:
             "memory_state": None,
             "error_recovery_active": False,
             "error_context": None,
+            "final_narrative": None,
         }
 
         result = await orchestrator._process_tool_results(state)
@@ -363,6 +375,7 @@ class TestLanggraphAgentToolUsage:
             "memory_state": None,
             "error_recovery_active": False,
             "error_context": None,
+            "final_narrative": None,
         }
 
         result = await orchestrator._handle_errors(state)
@@ -409,7 +422,12 @@ class TestAgentToolOrchestrationPerformance:
         )
 
         with patch("backend.engine.orchestrator.create_provider"):
-            return TurnOrchestrator(spec, "perf_test_session")
+            return TurnOrchestrator(
+                session_id="perf_test_session",
+                db_manager=None,
+                world_background=spec.name,
+                entities=spec.entities,
+            )
 
     def test_routing_decision_performance(self, performance_orchestrator):
         """Test that routing decisions are made efficiently."""
@@ -434,6 +452,7 @@ class TestAgentToolOrchestrationPerformance:
             "memory_state": None,
             "error_recovery_active": False,
             "error_context": None,
+            "final_narrative": None,
         }
 
         # Measure routing decision time
@@ -471,6 +490,7 @@ class TestAgentToolOrchestrationPerformance:
             "memory_state": None,
             "error_recovery_active": False,
             "error_context": None,
+            "final_narrative": None,
         }
 
         # Measure analysis time
