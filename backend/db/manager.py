@@ -1,555 +1,374 @@
 """
 Database manager for QuietStories.
 
-This module provides a high-level interface for database operations,
-handling scenarios and sessions with automatic connection management.
+Provides typed CRUD operations for all tables. Each method opens and closes
+its own DB session — no session state is held on the manager.
 """
 
 import os
+import uuid
+from contextlib import contextmanager
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Generator, List, Optional
 
-from sqlalchemy import create_engine, desc
+from sqlalchemy import and_, create_engine, desc
 from sqlalchemy.orm import Session as DBSession
 from sqlalchemy.orm import sessionmaker
 
-from backend.db.schema import Base, Scenario, Session, UserSettings
+from backend.db.schema import (
+    ActorState,
+    Base,
+    MemoryEntry,
+    Scenario,
+    Session,
+    TurnLog,
+    UserSettings,
+    WorldState,
+)
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
 class DatabaseManager:
-    """
-    Manages database operations for scenarios and sessions.
-
-    This class provides CRUD operations for scenarios and sessions,
-    with automatic schema creation and connection pooling.
-
-    Attributes:
-        db_path: Path to the SQLite database file
-        engine: SQLAlchemy engine for database connections
-        SessionLocal: Factory for creating database sessions
-    """
+    """CRUD access for all QuietStories tables."""
 
     def __init__(self, db_path: str = "data/quietstories.db"):
-        """
-        Initialize the database manager.
-
-        Args:
-            db_path: Path to SQLite database file (created if doesn't exist)
-        """
-        self.db_path = db_path
-
-        # Ensure data directory exists
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
-
-        # Create engine and tables
         self.engine = create_engine(
             f"sqlite:///{db_path}",
-            echo=False,  # Set to True for SQL debugging
-            connect_args={"check_same_thread": False},  # Allow multi-threading
+            echo=False,
+            connect_args={"check_same_thread": False},
         )
         Base.metadata.create_all(self.engine)
         self.SessionLocal = sessionmaker(bind=self.engine)
-
         logger.info(f"Database initialized at {db_path}")
 
-    # ==================== Scenario Operations ====================
-
-    def save_scenario(self, scenario_dict: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Save a scenario to the database.
-
-        Args:
-            scenario_dict: Dictionary containing scenario data with keys:
-                - id: Scenario ID
-                - name: Scenario name
-                - spec: Complete scenario specification
-                - status: Scenario status (generated, compiled, etc.)
-
-        Returns:
-            Dictionary with saved scenario data
-
-        Raises:
-            ValueError: If required fields are missing
-        """
+    @contextmanager
+    def _session(self) -> Generator[DBSession, None, None]:
         db: DBSession = self.SessionLocal()
         try:
-            # Check if scenario exists
-            existing = (
-                db.query(Scenario).filter(Scenario.id == scenario_dict["id"]).first()
-            )
-
-            if existing:
-                # Update existing
-                existing.name = scenario_dict.get("name", "Unnamed Scenario")
-                existing.spec = scenario_dict["spec"]
-                existing.status = scenario_dict.get("status", "generated")
-                existing.updated_at = datetime.utcnow()  # type: ignore
-                scenario = existing
-            else:
-                # Create new
-                scenario = Scenario(
-                    id=scenario_dict["id"],
-                    name=scenario_dict.get("name", "Unnamed Scenario"),
-                    spec=scenario_dict["spec"],
-                    status=scenario_dict.get("status", "generated"),
-                    created_at=datetime.utcnow(),
-                )
-                db.add(scenario)
-
+            yield db
             db.commit()
-
-            # Convert to dict before closing session (don't refresh to avoid lazy loading issues)
-            result = {
-                "id": scenario.id,
-                "name": scenario.name,
-                "spec": scenario.spec,
-                "status": scenario.status,
-                "created_at": (
-                    scenario.created_at.isoformat() if scenario.created_at else None
-                ),
-            }
-
-            logger.debug(f"Saved scenario {result['id']}: {result['name']}")
-            return result
-        except Exception as e:
+        except Exception:
             db.rollback()
-            logger.error(f"Failed to save scenario: {e}")
             raise
         finally:
             db.close()
+
+    # ==================== Scenarios ====================
+
+    def save_scenario(self, scenario_id: str, name: str, spec: Dict[str, Any], status: str = "generated") -> None:
+        with self._session() as db:
+            existing = db.query(Scenario).filter(Scenario.id == scenario_id).first()
+            if existing:
+                existing.name = name
+                existing.spec = spec
+                existing.status = status
+                existing.updated_at = datetime.utcnow()
+            else:
+                db.add(Scenario(id=scenario_id, name=name, spec=spec, status=status))
 
     def get_scenario(self, scenario_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Retrieve a scenario by ID.
+        with self._session() as db:
+            row = db.query(Scenario).filter(Scenario.id == scenario_id).first()
+            if not row:
+                return None
+            return {"id": row.id, "name": row.name, "spec": row.spec, "status": row.status,
+                    "created_at": row.created_at.isoformat() if row.created_at else None}
 
-        Args:
-            scenario_id: The scenario's unique identifier
-
-        Returns:
-            Dictionary containing scenario data, or None if not found
-        """
-        db: DBSession = self.SessionLocal()
-        try:
-            scenario = db.query(Scenario).filter(Scenario.id == scenario_id).first()
-            if scenario:
-                return {
-                    "id": scenario.id,
-                    "name": scenario.name,
-                    "spec": scenario.spec,
-                    "status": scenario.status,
-                    "created_at": (
-                        scenario.created_at.isoformat() if scenario.created_at else None
-                    ),
-                }
-            return None
-        finally:
-            db.close()
-
-    def list_scenarios(
-        self, limit: int = 50, status: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        """
-        List scenarios with optional filtering.
-
-        Args:
-            limit: Maximum number of scenarios to return
-            status: Optional status filter (generated, compiled, etc.)
-
-        Returns:
-            List of scenario dictionaries, most recent first
-        """
-        db: DBSession = self.SessionLocal()
-        try:
-            query = db.query(Scenario)
-            if status:
-                query = query.filter(Scenario.status == status)
-
-            scenarios = query.order_by(desc(Scenario.created_at)).limit(limit).all()
-
-            return [
-                {
-                    "id": s.id,
-                    "name": s.name,
-                    "status": s.status,
-                    "created_at": s.created_at.isoformat() if s.created_at else None,
-                }
-                for s in scenarios
-            ]
-        finally:
-            db.close()
+    def list_scenarios(self, limit: int = 50) -> List[Dict[str, Any]]:
+        with self._session() as db:
+            rows = db.query(Scenario).order_by(desc(Scenario.created_at)).limit(limit).all()
+            return [{"id": r.id, "name": r.name, "status": r.status,
+                     "created_at": r.created_at.isoformat() if r.created_at else None}
+                    for r in rows]
 
     def update_scenario_status(self, scenario_id: str, status: str) -> bool:
-        """
-        Update a scenario's status.
+        with self._session() as db:
+            row = db.query(Scenario).filter(Scenario.id == scenario_id).first()
+            if not row:
+                return False
+            row.status = status
+            row.updated_at = datetime.utcnow()
+            return True
 
-        Args:
-            scenario_id: The scenario's unique identifier
-            status: New status (generated, compiled, failed)
+    # ==================== Sessions ====================
 
-        Returns:
-            True if updated successfully, False if not found
-        """
-        db: DBSession = self.SessionLocal()
-        try:
-            scenario = db.query(Scenario).filter(Scenario.id == scenario_id).first()
-            if scenario:
-                scenario.status = status  # type: ignore
-                scenario.updated_at = datetime.utcnow()  # type: ignore
-                db.commit()
-                logger.debug(f"Updated scenario {scenario_id} status to {status}")
-                return True
-            return False
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Failed to update scenario status: {e}")
-            raise
-        finally:
-            db.close()
-
-    # ==================== Session Operations ====================
-
-    def save_session(self, session_dict: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Save a session to the database.
-
-        Args:
-            session_dict: Dictionary containing session data with keys:
-                - id: Session ID
-                - scenario_id: Related scenario ID
-                - state: Current game state
-                - turn: Current turn number
-                - turn_history: List of turn records
-                - world_background: World narrative (optional)
-                - entities: List of entities (optional)
-                - private_memory: Private entity memories (optional)
-                - public_memory: Public entity memories (optional)
-                - status: Session status (optional)
-                - scenario_spec: Cached scenario spec (optional)
-
-        Returns:
-            Dictionary with saved session data
-
-        Raises:
-            ValueError: If required fields are missing
-        """
-        db: DBSession = self.SessionLocal()
-        try:
-            # Check if session exists
-            existing = (
-                db.query(Session).filter(Session.id == session_dict["id"]).first()
-            )
-
-            if existing:
-                # Update existing
-                existing.scenario_id = session_dict["scenario_id"]
-                existing.seed = session_dict.get("seed")  # type: ignore
-                existing.state = session_dict.get("state", {})
-                existing.turn = session_dict.get("turn", 0)
-                existing.turn_history = session_dict.get("turn_history", [])
-                existing.world_background = session_dict.get("world_background")  # type: ignore
-                existing.entities = session_dict.get("entities", [])
-                existing.private_memory = session_dict.get("private_memory", {})  # type: ignore
-                existing.public_memory = session_dict.get("public_memory", {})  # type: ignore
-                existing.status = session_dict.get("status", "active")  # type: ignore
-                existing.scenario_spec = session_dict.get("scenario_spec")  # type: ignore
-                existing.updated_at = datetime.utcnow()  # type: ignore
-                session = existing
-            else:
-                # Create new
-                session = Session(
-                    id=session_dict["id"],
-                    scenario_id=session_dict["scenario_id"],
-                    seed=session_dict.get("seed"),
-                    state=session_dict.get("state", {}),
-                    turn=session_dict.get("turn", 0),
-                    turn_history=session_dict.get("turn_history", []),
-                    world_background=session_dict.get("world_background"),
-                    entities=session_dict.get("entities", []),
-                    private_memory=session_dict.get("private_memory", {}),
-                    public_memory=session_dict.get("public_memory", {}),
-                    status=session_dict.get("status", "active"),
-                    scenario_spec=session_dict.get("scenario_spec"),
-                    created_at=datetime.utcnow(),
-                )
-                db.add(session)
-
-            db.commit()
-
-            result = {  # type: ignore
-                "id": session.id,  # type: ignore
-                "scenario_id": session.scenario_id,  # type: ignore
-                "seed": session.seed,  # type: ignore
-                "state": session.state,  # type: ignore
-                "turn": session.turn,  # type: ignore
-                "turn_history": session.turn_history or [],  # type: ignore
-                "world_background": session.world_background,  # type: ignore
-                "entities": session.entities or [],  # type: ignore
-                "private_memory": session.private_memory or {},  # type: ignore
-                "public_memory": session.public_memory or {},  # type: ignore
-                "status": session.status,  # type: ignore
-                "scenario_spec": session.scenario_spec,  # type: ignore
-                "created_at": (
-                    session.created_at.isoformat() if session.created_at else None
-                ),
-            }
-
-            logger.debug(f"Saved session {result['id']} at turn {result['turn']}")
-            return result
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Failed to save session: {e}")
-            raise
-        finally:
-            db.close()
+    def create_session(self, scenario_id: str, global_state: Dict[str, Any]) -> str:
+        session_id = str(uuid.uuid4())
+        with self._session() as db:
+            db.add(Session(id=session_id, scenario_id=scenario_id, global_state=global_state))
+        logger.info(f"Created session {session_id} for scenario {scenario_id}")
+        return session_id
 
     def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Retrieve a session by ID.
+        with self._session() as db:
+            row = db.query(Session).filter(Session.id == session_id).first()
+            if not row:
+                return None
+            return {"id": row.id, "scenario_id": row.scenario_id, "turn": row.turn,
+                    "global_state": row.global_state, "status": row.status,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "updated_at": row.updated_at.isoformat() if row.updated_at else None}
 
-        Args:
-            session_id: The session's unique identifier
-
-        Returns:
-            Dictionary containing complete session data, or None if not found
-        """
-        db: DBSession = self.SessionLocal()
-        try:
-            session = db.query(Session).filter(Session.id == session_id).first()
-            if session:
-                return {
-                    "id": session.id,
-                    "scenario_id": session.scenario_id,
-                    "seed": session.seed,
-                    "state": session.state,
-                    "turn": session.turn,
-                    "turn_history": session.turn_history or [],
-                    "world_background": session.world_background,
-                    "entities": session.entities or [],
-                    "private_memory": session.private_memory or {},
-                    "public_memory": session.public_memory or {},
-                    "status": session.status,
-                    "scenario_spec": session.scenario_spec,
-                    "created_at": (
-                        session.created_at.isoformat() if session.created_at else None
-                    ),
-                    "updated_at": (
-                        session.updated_at.isoformat() if session.updated_at else None
-                    ),
-                }
-            return None
-        finally:
-            db.close()
-
-    def list_sessions(
-        self, limit: int = 50, status: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        """
-        List sessions with optional filtering.
-
-        Args:
-            limit: Maximum number of sessions to return
-            status: Optional status filter (active, completed, failed)
-
-        Returns:
-            List of session dictionaries, most recent first
-        """
-        db: DBSession = self.SessionLocal()
-        try:
-            query = db.query(Session)
+    def list_sessions(self, status: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+        with self._session() as db:
+            q = db.query(Session)
             if status:
-                query = query.filter(Session.status == status)
+                q = q.filter(Session.status == status)
+            rows = q.order_by(desc(Session.updated_at)).limit(limit).all()
+            return [{"id": r.id, "scenario_id": r.scenario_id, "turn": r.turn, "status": r.status,
+                     "updated_at": r.updated_at.isoformat() if r.updated_at else None}
+                    for r in rows]
 
-            sessions = query.order_by(desc(Session.updated_at)).limit(limit).all()
+    def update_session(self, session_id: str, turn: Optional[int] = None,
+                       global_state: Optional[Dict[str, Any]] = None,
+                       status: Optional[str] = None) -> bool:
+        with self._session() as db:
+            row = db.query(Session).filter(Session.id == session_id).first()
+            if not row:
+                return False
+            if turn is not None:
+                row.turn = turn
+            if global_state is not None:
+                row.global_state = global_state
+            if status is not None:
+                row.status = status
+            row.updated_at = datetime.utcnow()
+            return True
 
-            return [
-                {
-                    "id": s.id,
-                    "scenario_id": s.scenario_id,
-                    "turn": s.turn,
-                    "status": s.status,
-                    "created_at": s.created_at.isoformat() if s.created_at else None,
-                    "updated_at": s.updated_at.isoformat() if s.updated_at else None,
-                }
-                for s in sessions
-            ]
-        finally:
-            db.close()
+    # ==================== World State ====================
 
-    def update_session(self, session_id: str, updates: Dict[str, Any]) -> bool:
-        """
-        Update session fields.
-
-        Args:
-            session_id: The session's unique identifier
-            updates: Dictionary of fields to update
-
-        Returns:
-            True if updated successfully, False if not found
-
-        Note:
-            This method updates only the fields provided in the updates dict.
-            Use save_session() for complete session replacement.
-        """
-        db: DBSession = self.SessionLocal()
-        try:
-            session = db.query(Session).filter(Session.id == session_id).first()
-            if session:
-                for key, value in updates.items():
-                    if hasattr(session, key):
-                        setattr(session, key, value)  # type: ignore
-                session.updated_at = datetime.utcnow()  # type: ignore
-                db.commit()
-                logger.debug(f"Updated session {session_id}: {list(updates.keys())}")
-                return True
-            return False
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Failed to update session: {e}")
-            raise
-        finally:
-            db.close()
-
-    def delete_session(self, session_id: str) -> bool:
-        """
-        Delete a session from the database.
-
-        Args:
-            session_id: The session's unique identifier
-
-        Returns:
-            True if deleted successfully, False if not found
-        """
-        db: DBSession = self.SessionLocal()
-        try:
-            session = db.query(Session).filter(Session.id == session_id).first()
-            if session:
-                db.delete(session)
-                db.commit()
-                logger.info(f"Deleted session {session_id}")
-                return True
-            return False
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Failed to delete session: {e}")
-            raise
-        finally:
-            db.close()
-
-    # ==================== UserSettings Operations ====================
-
-    def save_user_settings(self, settings_dict: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Save user settings to the database.
-
-        Args:
-            settings_dict: Dictionary containing settings data with keys:
-                - id: Settings ID (optional, will be generated if not provided)
-                - player_name: User's preferred player character name
-                - preferences: Additional user preferences as dict (optional)
-
-        Returns:
-            Dictionary with saved settings data
-
-        Raises:
-            ValueError: If required fields are missing
-        """
-        db: DBSession = self.SessionLocal()
-        try:
-            # Check if settings exist (assume single user for now)
-            existing = db.query(UserSettings).first()
-
-            if existing:
-                # Update existing
-                existing.player_name = settings_dict["player_name"]
-                existing.preferences = settings_dict.get("preferences", {})
-                existing.updated_at = datetime.utcnow()  # type: ignore
-                settings = existing
+    def save_world_state(self, session_id: str, locations: Dict[str, Any],
+                         factions: Dict[str, Any], time_of_day: str, day: int,
+                         active_events: List[Any]) -> None:
+        with self._session() as db:
+            row = db.query(WorldState).filter(WorldState.session_id == session_id).first()
+            if row:
+                row.locations = locations
+                row.factions = factions
+                row.time_of_day = time_of_day
+                row.day = day
+                row.active_events = active_events
+                row.updated_at = datetime.utcnow()
             else:
-                # Create new
-                settings = UserSettings(
-                    player_name=settings_dict["player_name"],
-                    preferences=settings_dict.get("preferences", {}),
-                    created_at=datetime.utcnow(),
-                )
-                db.add(settings)
+                db.add(WorldState(
+                    session_id=session_id, locations=locations, factions=factions,
+                    time_of_day=time_of_day, day=day, active_events=active_events,
+                ))
 
-            db.commit()
+    def get_world_state(self, session_id: str) -> Optional[Dict[str, Any]]:
+        with self._session() as db:
+            row = db.query(WorldState).filter(WorldState.session_id == session_id).first()
+            if not row:
+                return None
+            return {"locations": row.locations, "factions": row.factions,
+                    "time_of_day": row.time_of_day, "day": row.day,
+                    "active_events": row.active_events}
 
-            result = {
-                "id": settings.id,
-                "player_name": settings.player_name,
-                "preferences": settings.preferences,
-                "created_at": (
-                    settings.created_at.isoformat() if settings.created_at else None
-                ),
-                "updated_at": (
-                    settings.updated_at.isoformat() if settings.updated_at else None
-                ),
-            }
+    # ==================== Actor State ====================
 
-            logger.debug(f"Saved user settings for player: {result['player_name']}")
-            return result
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Failed to save user settings: {e}")
-            raise
-        finally:
-            db.close()
+    def save_actor(self, session_id: str, actor_id: str, data: Dict[str, Any]) -> None:
+        """
+        Upsert an actor's state for a session.
+
+        data keys: name, personality, background, is_player, location_id,
+                   state, goals, relationships, known_facts, last_action_turn
+        """
+        with self._session() as db:
+            row = (db.query(ActorState)
+                   .filter(and_(ActorState.session_id == session_id,
+                                ActorState.actor_id == actor_id))
+                   .first())
+            if row:
+                for key, value in data.items():
+                    if hasattr(row, key):
+                        setattr(row, key, value)
+                row.updated_at = datetime.utcnow()
+            else:
+                db.add(ActorState(session_id=session_id, actor_id=actor_id, **data))
+
+    def get_actor(self, session_id: str, actor_id: str) -> Optional[Dict[str, Any]]:
+        with self._session() as db:
+            row = (db.query(ActorState)
+                   .filter(and_(ActorState.session_id == session_id,
+                                ActorState.actor_id == actor_id))
+                   .first())
+            return self._actor_to_dict(row) if row else None
+
+    def get_all_actors(self, session_id: str) -> List[Dict[str, Any]]:
+        with self._session() as db:
+            rows = db.query(ActorState).filter(ActorState.session_id == session_id).all()
+            return [self._actor_to_dict(r) for r in rows]
+
+    def get_actors_at_location(self, session_id: str, location_id: str) -> List[Dict[str, Any]]:
+        with self._session() as db:
+            rows = (db.query(ActorState)
+                    .filter(and_(ActorState.session_id == session_id,
+                                 ActorState.location_id == location_id))
+                    .all())
+            return [self._actor_to_dict(r) for r in rows]
+
+    def get_player_actor(self, session_id: str) -> Optional[Dict[str, Any]]:
+        with self._session() as db:
+            row = (db.query(ActorState)
+                   .filter(and_(ActorState.session_id == session_id,
+                                ActorState.is_player == True))
+                   .first())
+            return self._actor_to_dict(row) if row else None
+
+    def _actor_to_dict(self, row: ActorState) -> Dict[str, Any]:
+        return {
+            "actor_id": row.actor_id,
+            "session_id": row.session_id,
+            "is_player": row.is_player,
+            "name": row.name,
+            "personality": row.personality,
+            "background": row.background,
+            "location_id": row.location_id,
+            "state": row.state,
+            "goals": row.goals,
+            "relationships": row.relationships,
+            "known_facts": row.known_facts,
+            "last_action_turn": row.last_action_turn,
+        }
+
+    # ==================== Memory Entries ====================
+
+    def add_memory(self, session_id: str, actor_id: str, turn: int,
+                   content: str, tags: List[str], visibility: str = "private") -> str:
+        memory_id = str(uuid.uuid4())
+        with self._session() as db:
+            db.add(MemoryEntry(
+                id=memory_id, session_id=session_id, actor_id=actor_id,
+                turn=turn, content=content, tags=tags, visibility=visibility,
+            ))
+        return memory_id
+
+    def get_recent_memories(self, session_id: str, actor_id: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Get the N most recent memories for an actor."""
+        with self._session() as db:
+            rows = (db.query(MemoryEntry)
+                    .filter(and_(MemoryEntry.session_id == session_id,
+                                 MemoryEntry.actor_id == actor_id))
+                    .order_by(desc(MemoryEntry.turn))
+                    .limit(limit)
+                    .all())
+            return [self._memory_to_dict(r) for r in rows]
+
+    def get_tagged_memories(self, session_id: str, actor_id: str,
+                            tags: List[str], limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get memories for an actor whose tags overlap with the given tags.
+
+        Used to surface relevant older memories for the current scene:
+        pass in the current location ID, IDs of present actors, and topic keywords.
+        """
+        if not tags:
+            return []
+        with self._session() as db:
+            rows = (db.query(MemoryEntry)
+                    .filter(and_(MemoryEntry.session_id == session_id,
+                                 MemoryEntry.actor_id == actor_id))
+                    .order_by(desc(MemoryEntry.turn))
+                    .all())
+            # Filter in Python — SQLite JSON array overlap isn't easy without extensions
+            matched = []
+            tag_set = set(tags)
+            for row in rows:
+                if tag_set & set(row.tags or []):
+                    matched.append(self._memory_to_dict(row))
+                    if len(matched) >= limit:
+                        break
+            return matched
+
+    def get_memories_older_than(self, session_id: str, actor_id: str, turn: int) -> List[Dict[str, Any]]:
+        """Get all memories for an actor from before a given turn (for the summarizer)."""
+        with self._session() as db:
+            rows = (db.query(MemoryEntry)
+                    .filter(and_(MemoryEntry.session_id == session_id,
+                                 MemoryEntry.actor_id == actor_id,
+                                 MemoryEntry.turn < turn))
+                    .order_by(MemoryEntry.turn)
+                    .all())
+            return [self._memory_to_dict(r) for r in rows]
+
+    def get_public_memories(self, session_id: str, since_turn: int = 0) -> List[Dict[str, Any]]:
+        """Get all public memories (world events) since a given turn."""
+        with self._session() as db:
+            rows = (db.query(MemoryEntry)
+                    .filter(and_(MemoryEntry.session_id == session_id,
+                                 MemoryEntry.visibility == "public",
+                                 MemoryEntry.turn >= since_turn))
+                    .order_by(MemoryEntry.turn)
+                    .all())
+            return [self._memory_to_dict(r) for r in rows]
+
+    def _memory_to_dict(self, row: MemoryEntry) -> Dict[str, Any]:
+        return {
+            "id": row.id,
+            "actor_id": row.actor_id,
+            "turn": row.turn,
+            "content": row.content,
+            "tags": row.tags,
+            "visibility": row.visibility,
+        }
+
+    # ==================== Turn Log ====================
+
+    def append_turn(self, session_id: str, turn: int, player_action: str,
+                    narrator_output: Dict[str, Any], npc_decisions: List[Dict[str, Any]],
+                    roll_results: List[Dict[str, Any]]) -> None:
+        with self._session() as db:
+            db.add(TurnLog(
+                session_id=session_id, turn=turn, player_action=player_action,
+                narrator_output=narrator_output, npc_decisions=npc_decisions,
+                roll_results=roll_results,
+            ))
+
+    def get_recent_turns(self, session_id: str, limit: int = 5) -> List[Dict[str, Any]]:
+        with self._session() as db:
+            rows = (db.query(TurnLog)
+                    .filter(TurnLog.session_id == session_id)
+                    .order_by(desc(TurnLog.turn))
+                    .limit(limit)
+                    .all())
+            return [self._turn_to_dict(r) for r in reversed(rows)]
+
+    def get_turns_older_than(self, session_id: str, turn: int) -> List[Dict[str, Any]]:
+        """Used by the summarizer to read older turns before distilling them."""
+        with self._session() as db:
+            rows = (db.query(TurnLog)
+                    .filter(and_(TurnLog.session_id == session_id, TurnLog.turn < turn))
+                    .order_by(TurnLog.turn)
+                    .all())
+            return [self._turn_to_dict(r) for r in rows]
+
+    def _turn_to_dict(self, row: TurnLog) -> Dict[str, Any]:
+        return {
+            "turn": row.turn,
+            "player_action": row.player_action,
+            "narrator_output": row.narrator_output,
+            "npc_decisions": row.npc_decisions,
+            "roll_results": row.roll_results,
+        }
+
+    # ==================== User Settings ====================
+
+    def save_user_settings(self, player_name: str, preferences: Dict[str, Any]) -> None:
+        with self._session() as db:
+            row = db.query(UserSettings).first()
+            if row:
+                row.player_name = player_name
+                row.preferences = preferences
+                row.updated_at = datetime.utcnow()
+            else:
+                db.add(UserSettings(player_name=player_name, preferences=preferences))
 
     def get_user_settings(self) -> Optional[Dict[str, Any]]:
-        """
-        Retrieve user settings from the database.
-
-        Returns:
-            Dictionary containing settings data, or None if not found
-        """
-        db: DBSession = self.SessionLocal()
-        try:
-            settings = db.query(UserSettings).first()
-            if settings:
-                return {
-                    "id": settings.id,
-                    "player_name": settings.player_name,
-                    "preferences": settings.preferences,
-                    "created_at": (
-                        settings.created_at.isoformat() if settings.created_at else None
-                    ),
-                    "updated_at": (
-                        settings.updated_at.isoformat() if settings.updated_at else None
-                    ),
-                }
-            return None
-        finally:
-            db.close()
-
-    def update_user_settings(self, updates: Dict[str, Any]) -> bool:
-        """
-        Update user settings fields.
-
-        Args:
-            updates: Dictionary of fields to update
-
-        Returns:
-            True if updated successfully, False if not found
-        """
-        db: DBSession = self.SessionLocal()
-        try:
-            settings = db.query(UserSettings).first()
-            if settings:
-                for key, value in updates.items():
-                    if hasattr(settings, key) and key not in ["id", "created_at"]:
-                        setattr(settings, key, value)  # type: ignore
-                settings.updated_at = datetime.utcnow()  # type: ignore
-                db.commit()
-                logger.debug(f"Updated user settings: {list(updates.keys())}")
-                return True
-            return False
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Failed to update user settings: {e}")
-            raise
-        finally:
-            db.close()
+        with self._session() as db:
+            row = db.query(UserSettings).first()
+            if not row:
+                return None
+            return {"id": row.id, "player_name": row.player_name, "preferences": row.preferences}

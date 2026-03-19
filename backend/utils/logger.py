@@ -20,6 +20,7 @@ Usage:
     logger.debug("This is a debug message")
 """
 
+import io
 import logging
 import sys
 from datetime import datetime
@@ -86,7 +87,13 @@ def setup_logging(
 
     # Console handler (optional)
     if enable_console_logging:
-        console_handler = logging.StreamHandler(sys.stdout)
+        # On Windows the default stdout encoding (cp1252) can't handle all Unicode.
+        # Wrap with UTF-8 and errors='replace' so non-encodable chars become '?' instead of crashing.
+        if hasattr(sys.stdout, 'buffer'):
+            safe_stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+        else:
+            safe_stdout = sys.stdout
+        console_handler = logging.StreamHandler(safe_stdout)
         console_handler.setLevel(numeric_level)
 
         if enable_colors and sys.stdout.isatty():

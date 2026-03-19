@@ -1,103 +1,77 @@
 """
-Configuration management for the Dynamic CYOA Engine
+Configuration management for QuietStories.
 """
 
-import os
 from typing import Literal, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
-# Default LM Studio API endpoint
 DEFAULT_LMSTUDIO_PORT = 1234
 DEFAULT_LMSTUDIO_API_BASE = f"http://localhost:{DEFAULT_LMSTUDIO_PORT}/v1"
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables"""
+    """Application settings loaded from environment variables."""
 
-    # LLM Provider Configuration
+    # LLM Provider
     model_provider: Literal["openai", "ollama", "generic", "lmstudio"] = Field(
         default="openai"
     )
     openai_api_base: str = Field(default="https://api.openai.com/v1")
     openai_api_key: str = Field(default="")
-    model_name: str = Field(default="gpt-5-nano")
+    model_name: str = Field(default="gpt-4o-mini")
 
-    # LM Studio specific configuration
     lmstudio_api_base: Optional[str] = Field(
         default=None,
-        description=f"LM Studio API base URL (e.g., {DEFAULT_LMSTUDIO_API_BASE}). If not set, uses openai_api_base",
+        description=f"LM Studio API base URL. Defaults to {DEFAULT_LMSTUDIO_API_BASE}",
     )
 
-    # Embedding Provider Configuration (for semantic memory search)
-    # Options: "openai", "ollama", "lmstudio", "none"
-    # If not set, defaults to match model_provider (or "none" if model_provider doesn't support embeddings)
-    embedding_provider: Optional[Literal["openai", "ollama", "lmstudio", "none"]] = (
-        Field(default=None)
-    )
-    embedding_model_name: str = Field(
-        default="text-embedding-3-small",
-        description="Embedding model name (e.g., 'nomic-embed-text' for Ollama, 'text-embedding-3-small' for OpenAI)",
-    )
-    embedding_api_base: Optional[str] = Field(
-        default=None,
-        description="Embedding API base URL (defaults to openai_api_base if not set)",
+    # Database
+    database_path: str = Field(
+        default="data/quietstories.db",
+        description="SQLite database file path",
     )
 
-    # Server Configuration
+    # Server
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8000)
     debug: bool = Field(default=False)
-    # Verbose logging settings for debugging
-    verbose_orchestrator: bool = True
-    log_message_sequences: bool = True
-    orchestrator_recursion_limit: int = Field(default=50)
 
-    # Performance optimization settings
-    enable_performance_tracking: bool = Field(
-        default=True,
-        description="Enable detailed performance tracking and metrics collection",
-    )
-    max_parallel_tool_calls: int = Field(
-        default=10,
-        description="Maximum number of tool calls to execute in parallel (ToolNode handles this automatically)",
-    )
-
-    # Monte Carlo Configuration
-    monte_carlo_turns: int = Field(default=100)
-    negativity_min_fail_rate: float = Field(default=0.25)
-
-    # Database Configuration
-    database_path: str = Field(
-        default="data/quietstories.db",
-        description="SQLite database file path for storing scenarios and sessions",
-    )
-
-    # CORS Configuration
+    # CORS
     cors_allow_origins: str = Field(
         default="http://localhost:5173,http://localhost:3000",
-        description="Comma-separated list of allowed origins for CORS",
+        description="Comma-separated list of allowed CORS origins",
     )
 
-    # Logging Configuration
-    log_level: str = Field(
-        default="INFO",
-        description="Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
+    # Memory system
+    memory_summary_interval: int = Field(
+        default=15,
+        description="Run the memory summarizer every N turns, updating actor known_facts",
     )
-    log_file: Optional[str] = Field(
-        default=None,
-        description="Path to log file (optional)",
+    memory_retrieval_recent: int = Field(
+        default=5,
+        description="Always include this many recent memories per active actor",
     )
-    enable_console_logs: bool = Field(
-        default=True,
-        description="Enable console logging (set to false in production)",
+    memory_retrieval_tagged: int = Field(
+        default=10,
+        description="Max tag-matched memories to retrieve per actor per turn",
     )
+
+    # NPC engine
+    npc_offscene_interval: int = Field(
+        default=2,
+        description="Off-scene NPCs act every N turns (catching up on N turns of activity)",
+    )
+
+    # Logging
+    log_level: str = Field(default="INFO")
+    log_file: Optional[str] = Field(default=None)
+    enable_console_logs: bool = Field(default=True)
 
     class Config:
         env_file = ".env"
         case_sensitive = False
 
 
-# Global settings instance
 settings = Settings()

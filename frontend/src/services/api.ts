@@ -62,25 +62,30 @@ export interface SettingsRequest {
 
 export interface SessionCreateRequest {
   scenario_id: string;
-  seed?: number;
-  config?: SessionConfig;
+  player_name?: string;
+}
+
+export interface SessionCreateResponse {
+  session_id: string;
+  scenario_id: string;
+  opening_narrative: string;
+  status: string;
 }
 
 export interface TurnRequest {
-  action?: string;
-  parameters?: Record<string, unknown>;
+  action: string;
 }
 
 export interface TurnResponse {
-  session_id: string;
   turn: number;
-  outcome: {
-    narrative: string;
-    visible_dialogue?: Array<{ entity_id: string; utterance: string }>;
-    state_changes: Array<{ op: string; path: string; value?: unknown }>;
-    roll_requests?: Array<{ kind: string; target?: string; difficulty?: number }>;
-    suggested_actions?: string[];
-  };
+  narrative: string;
+  visible_dialogue?: Array<{ actor_id: string; utterance: string }>;
+  npc_actions?: Array<{ actor_id: string; action?: { type: string; content?: string; visible_to_player: boolean } }>;
+  roll_results?: Array<{ kind: string; difficulty: number; roll: number; success: boolean }>;
+  suggested_actions?: string[];
+  game_over: boolean;
+  game_over_message?: string;
+  win: boolean;
 }
 
 export interface ScenarioGenerateResponse {
@@ -92,8 +97,8 @@ export interface ScenarioGenerateResponse {
 
 export interface ScenarioCompileResponse {
   id: string;
-  status: string;
-  validation_results: Record<string, unknown>;
+  valid: boolean;
+  issues: string[];
 }
 
 export interface Memory {
@@ -141,7 +146,7 @@ class ApiService {
   }
 
   // Session Management
-  async createSession(request: SessionCreateRequest): Promise<Session> {
+  async createSession(request: SessionCreateRequest): Promise<SessionCreateResponse> {
     const response = await fetch(`${this.baseUrl}/sessions/`, {
       method: 'POST',
       headers: {
@@ -193,66 +198,6 @@ class ApiService {
     return response.json();
   }
 
-  async *processTurnStreaming(sessionId: string, request: TurnRequest): AsyncIterableIterator<string> {
-    const response = await fetch(`${this.baseUrl}/sessions/${sessionId}/turns/stream`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'text/event-stream',
-      },
-      body: JSON.stringify(request),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to process turn: ${response.statusText}`);
-    }
-
-    if (!response.body) {
-      throw new Error('Response body is null');
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6); // Remove 'data: ' prefix
-
-            if (data.trim() === '[DONE]') {
-              return; // End of stream
-            }
-
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.type === 'narrative_chunk') {
-                yield parsed.content;
-              } else if (parsed.type === 'complete') {
-                // Final outcome - we could yield this as well if needed
-                return;
-              }
-            } catch (error) {
-              // Ignore malformed JSON lines
-              console.warn('Failed to parse streaming data:', data, error);
-            }
-          }
-        }
-      }
-    } finally {
-      reader.releaseLock();
-    }
-  }
-
   // Scenario Management
   async generateScenario(description: string): Promise<ScenarioGenerateResponse> {
     const response = await fetch(`${this.baseUrl}/scenarios/generate`, {
@@ -271,12 +216,12 @@ class ApiService {
   }
 
   async compileScenario(scenarioId: string): Promise<ScenarioCompileResponse> {
-    const response = await fetch(`${this.baseUrl}/scenarios/${scenarioId}/compile`, {
+    const response = await fetch(`${this.baseUrl}/scenarios/${scenarioId}/validate`, {
       method: 'POST',
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to compile scenario: ${response.statusText}`);
+      throw new Error(`Failed to validate scenario: ${response.statusText}`);
     }
 
     return response.json();

@@ -213,7 +213,7 @@ async def startup_event():
     from backend.db.manager import DatabaseManager
 
     db = DatabaseManager(settings.database_path)
-    logger.info(f"✓ Database initialized: {settings.database_path}")
+    logger.info(f"Database initialized: {settings.database_path}")
 
     # Log configuration
     logger.info(f"Configuration:")
@@ -255,5 +255,3 @@ if __name__ == "__main__":
         reload=settings.debug,
         log_level=log_level.lower(),
     )
-# test comment
-# another test

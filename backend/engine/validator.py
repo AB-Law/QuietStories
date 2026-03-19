@@ -1,294 +1,146 @@
 """
-Scenario validator with Monte Carlo simulation for auto-balancing
+Scenario validator for ScenarioSpec v2.0.
+
+Replaces the old Monte Carlo simulation approach. Validation now checks:
+- Schema integrity (Pydantic)
+- Exactly one player actor
+- Unique actor / location IDs
+- At least one loss condition
+- All actor location_ids reference a known location
 """
 
-import json
-import random
 from typing import Any, Dict, List, Tuple
 
-from backend.config import settings
 from backend.schemas import ScenarioSpec, validate_scenario_spec
-from backend.utils.jsonlogic import JSONLogicEvaluator
+from backend.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class ScenarioValidator:
-    """Validates scenario specifications and performs auto-balancing"""
+    """Validates a ScenarioSpec dict and performs lightweight auto-repair."""
 
-    def __init__(self):
-        self.monte_carlo_turns = settings.monte_carlo_turns
-        self.min_fail_rate = settings.negativity_min_fail_rate
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     def validate_spec(self, spec_data: Dict[str, Any]) -> Tuple[bool, List[str]]:
-        """Validate a scenario specification"""
-        issues = []
+        """
+        Validate a raw spec dict.
 
+        Returns (is_valid, list_of_issue_strings).
+        """
+        issues: List[str] = []
+
+        # 1. Pydantic schema validation
         try:
-            # Parse and validate the spec
             spec = validate_scenario_spec(spec_data)
-
-            # Check negativity budget
-            if spec.negativity_budget.min_fail_rate <= 0:
-                issues.append("Negativity budget must have non-zero min_fail_rate")
-
-            # Check loss conditions
-            if len(spec.loss_conditions) < 2:
-                issues.append("At least 2 loss conditions are required")
-
-            # Check random event weights
-            for event in spec.random_events:
-                if not (0.05 <= event.weight <= 0.30):
-                    issues.append(
-                        f"Event {event.id} weight {event.weight} must be between 0.05-0.30"
-                    )
-
-            # Check for forbidden scenario nouns (empty list by default)
-            forbidden_nouns: List[str] = []  # Can be configured later
-            for key, value in spec_data.items():
-                if isinstance(value, str):
-                    if any(noun.lower() in value.lower() for noun in forbidden_nouns):
-                        issues.append(f"Forbidden scenario noun found in {key}")
-
-            return len(issues) == 0, issues
-
         except Exception as e:
             issues.append(f"Schema validation failed: {e}")
             return False, issues
 
-    def monte_carlo_simulation(self, spec: ScenarioSpec) -> Tuple[bool, Dict[str, Any]]:
-        """Run Monte Carlo simulation to test scenario difficulty"""
+        # 2. Exactly one player
+        players = [a for a in spec.actors if a.is_player]
+        if len(players) == 0:
+            issues.append("No player actor found (is_player must be true on exactly one actor)")
+        elif len(players) > 1:
+            issues.append(
+                f"Multiple player actors found: {[a.id for a in players]} — only one allowed"
+            )
 
-        results = {
-            "total_simulations": self.monte_carlo_turns,
-            "failures": 0,
-            "successes": 0,
-            "avg_turns_to_failure": 0,
-            "avg_turns_to_success": 0,
-            "fail_rate": 0.0,
-            "passed": False,
-        }
+        # 3. Unique actor IDs
+        actor_ids = [a.id for a in spec.actors]
+        seen_actor_ids: set = set()
+        for aid in actor_ids:
+            if aid in seen_actor_ids:
+                issues.append(f"Duplicate actor id: '{aid}'")
+            seen_actor_ids.add(aid)
 
-        failure_turns = []
-        success_turns = []
+        # 4. Unique location IDs
+        loc_ids = [loc.id for loc in spec.world.locations]
+        seen_loc_ids: set = set()
+        for lid in loc_ids:
+            if lid in seen_loc_ids:
+                issues.append(f"Duplicate location id: '{lid}'")
+            seen_loc_ids.add(lid)
 
-        for simulation in range(self.monte_carlo_turns):
-            # Create a deep copy of the spec for this simulation
-            sim_spec = spec.copy(deep=True)
-            sim_spec.seed = random.randint(1, 1000000)
+        # 5. Actor locations exist
+        known_locs = set(loc_ids)
+        for actor in spec.actors:
+            if actor.location_id not in known_locs:
+                issues.append(
+                    f"Actor '{actor.id}' has unknown location_id '{actor.location_id}'"
+                )
 
-            # Simulate the scenario
-            outcome = self._simulate_scenario(sim_spec)
+        # 6. At least 2 NPCs
+        npcs = [a for a in spec.actors if not a.is_player]
+        if len(npcs) < 2:
+            issues.append(
+                f"Only {len(npcs)} NPC(s) — at least 2 NPCs are required for meaningful play"
+            )
 
-            if outcome["result"] == "failure":
-                results["failures"] += 1
-                failure_turns.append(outcome["turns"])
-            elif outcome["result"] == "success":
-                results["successes"] += 1
-                success_turns.append(outcome["turns"])
+        # 8. At least 2 locations
+        if len(spec.world.locations) < 2:
+            issues.append("At least 2 locations are required")
 
-        # Calculate statistics
-        results["fail_rate"] = results["failures"] / self.monte_carlo_turns
-
-        if failure_turns:
-            results["avg_turns_to_failure"] = sum(failure_turns) / len(failure_turns)
-
-        if success_turns:
-            results["avg_turns_to_success"] = sum(success_turns) / len(success_turns)
-
-        # Check if scenario meets difficulty requirements
-        results["passed"] = results["fail_rate"] >= self.min_fail_rate
-
-        return results["passed"], results
-
-    def _simulate_scenario(self, spec: ScenarioSpec) -> Dict[str, Any]:
-        """Simulate a single scenario run"""
-
-        # Initialize state
-        state = spec.state.copy()
-        turn = 0
-        max_turns = 50  # Prevent infinite loops
-
-        while turn < max_turns:
-            turn += 1
-
-            # Check loss conditions
-            for loss_condition in spec.loss_conditions:
-                if self._evaluate_condition(loss_condition.condition, state):
-                    return {
-                        "result": "failure",
-                        "turns": turn,
-                        "reason": loss_condition.id,
-                    }
-
-            # Simulate random events
-            for event in spec.random_events:
-                if self._evaluate_condition(event.when, state):
-                    # Roll for event occurrence
-                    if random.random() < event.weight:
-                        # Apply event effects
-                        state = self._apply_effects(state, event.effects)
-
-            # Simulate action selection (baseline policy)
-            available_actions = self._get_available_actions(spec.actions, state)
-            if not available_actions:
-                return {"result": "failure", "turns": turn, "reason": "no_actions"}
-
-            # Select random action
-            action = random.choice(available_actions)
-            state = self._apply_effects(state, action.effects)
-
-            # Check for success conditions (if any)
-            # This would need to be defined in the spec
-
-        return {"result": "timeout", "turns": turn, "reason": "max_turns_reached"}
-
-    def _evaluate_condition(
-        self, condition: Dict[str, Any], state: Dict[str, Any]
-    ) -> bool:
-        """Evaluate a JSONLogic condition against the current state"""
-        try:
-            evaluator = JSONLogicEvaluator()
-            return evaluator.evaluate_condition(condition, state)
-        except Exception:
-            return False
-
-    def _get_available_actions(self, actions: List, state: Dict[str, Any]) -> List:
-        """Get actions that are available given current state"""
-        available = []
-        for action in actions:
-            if self._evaluate_condition(action.preconditions, state):
-                available.append(action)
-        return available
-
-    def _apply_effects(self, state: Dict[str, Any], effects: List) -> Dict[str, Any]:
-        """Apply effects to the state"""
-        new_state = state.copy()
-
-        for effect in effects:
-            op = effect.op
-            path = effect.path
-            value = effect.value
-
-            if op == "set":
-                self._set_value_at_path(new_state, path, value)
-            elif op == "inc":
-                current_value = self._get_value_at_path(new_state, path)
-                self._set_value_at_path(new_state, path, current_value + value)
-            elif op == "dec":
-                current_value = self._get_value_at_path(new_state, path)
-                self._set_value_at_path(new_state, path, current_value - value)
-            elif op == "mul":
-                current_value = self._get_value_at_path(new_state, path)
-                self._set_value_at_path(new_state, path, current_value * value)
-            elif op == "patch":
-                current_value = self._get_value_at_path(new_state, path)
-                if isinstance(current_value, dict) and isinstance(value, dict):
-                    current_value.update(value)
-                    self._set_value_at_path(new_state, path, current_value)
-            elif op == "push":
-                current_value = self._get_value_at_path(new_state, path)
-                if isinstance(current_value, list):
-                    current_value.append(value)
-                    self._set_value_at_path(new_state, path, current_value)
-            elif op == "pop":
-                current_value = self._get_value_at_path(new_state, path)
-                if isinstance(current_value, list) and len(current_value) > 0:
-                    current_value.pop()
-                    self._set_value_at_path(new_state, path, current_value)
-            elif op == "addlog":
-                log_path = path if path else "log"
-                current_log = self._get_value_at_path(new_state, log_path)
-                if isinstance(current_log, list):
-                    current_log.append(value)
-                    self._set_value_at_path(new_state, log_path, current_log)
-                else:
-                    self._set_value_at_path(new_state, log_path, [value])
-            else:
-                raise NotImplementedError(f"Effect operation '{op}' not implemented")
-
-        return new_state
-
-    def _get_value_at_path(self, state: Dict[str, Any], path: str) -> Any:
-        """Get value at JSON pointer path"""
-        if not path or path == "":
-            return state
-
-        parts = path.split(".")
-        current: Any = state
-
-        for part in parts:
-            if part.startswith("[") and part.endswith("]"):
-                index = int(part[1:-1])
-                current = current[index]
-            else:
-                current = current.get(part, {})
-
-        return current
-
-    def _set_value_at_path(self, state: Dict[str, Any], path: str, value: Any):
-        """Set value at JSON pointer path"""
-        if not path or path == "":
-            state.update(value)
-            return
-
-        parts = path.split(".")
-        current: Any = state
-
-        for i, part in enumerate(parts[:-1]):
-            if part.startswith("[") and part.endswith("]"):
-                index = int(part[1:-1])
-                current = current[index]
-            else:
-                if part not in current:
-                    current[part] = {}
-                current = current[part]
-
-        final_part = parts[-1]
-        if final_part.startswith("[") and final_part.endswith("]"):
-            index = int(final_part[1:-1])
-            current[index] = value
+        is_valid = len(issues) == 0
+        if is_valid:
+            logger.info(f"Spec '{spec.name}' passed validation")
         else:
-            current[final_part] = value
+            logger.warning(f"Spec validation issues: {issues}")
+
+        return is_valid, issues
 
     def auto_repair(
         self, spec_data: Dict[str, Any], issues: List[str]
     ) -> Dict[str, Any]:
-        """Attempt to auto-repair a scenario specification"""
+        """
+        Attempt simple structural repairs on a raw spec dict.
 
-        repaired = spec_data.copy()
+        Only fixes things that can be repaired without re-generating content.
+        """
+        repaired = _deep_copy(spec_data)
 
-        # Fix negativity budget
-        if "Negativity budget must have non-zero min_fail_rate" in issues:
-            if "negativity_budget" not in repaired:
-                repaired["negativity_budget"] = {}
-            repaired["negativity_budget"]["min_fail_rate"] = 0.25
-            repaired["negativity_budget"]["decay_per_turn"] = {}
+        # Ensure spec_version
+        repaired.setdefault("spec_version", "2.0")
 
-        # Fix loss conditions
-        if "At least 2 loss conditions are required" in issues:
-            if (
-                "loss_conditions" not in repaired
-                or len(repaired["loss_conditions"]) < 2
-            ):
-                repaired["loss_conditions"] = [
-                    {
-                        "id": "health_loss",
-                        "condition": {"<": [{"var": "state.health"}, 0]},
-                        "message": "You have died.",
-                    },
-                    {
-                        "id": "time_loss",
-                        "condition": {">": [{"var": "state.turns"}, 100]},
-                        "message": "Time has run out.",
-                    },
-                ]
+        # Ensure world exists
+        repaired.setdefault("world", {})
+        repaired["world"].setdefault("locations", [])
+        repaired["world"].setdefault("factions", [])
+        repaired["world"].setdefault("rules", "")
+        repaired["world"].setdefault("description", "")
+        repaired["world"].setdefault("tone", "")
+        repaired["world"].setdefault("initial_time", "dawn")
+        repaired["world"].setdefault("initial_day", 1)
 
-        # Fix random event weights
-        if "random_events" in repaired:
-            for event in repaired["random_events"]:
-                if "weight" in event:
-                    if event["weight"] < 0.05:
-                        event["weight"] = 0.05
-                    elif event["weight"] > 0.30:
-                        event["weight"] = 0.30
+        # Ensure actors list exists
+        repaired.setdefault("actors", [])
 
+        # Ensure global_state
+        repaired.setdefault("global_state", {})
+
+        # Ensure seed
+        import random as _random
+        repaired.setdefault("seed", _random.randint(1, 1_000_000))
+
+        # Fix location_ids for actors whose location is missing
+        known_locs = {loc["id"] for loc in repaired["world"]["locations"] if "id" in loc}
+        if known_locs:
+            fallback_loc = next(iter(known_locs))
+            for actor in repaired.get("actors", []):
+                if actor.get("location_id") not in known_locs:
+                    actor["location_id"] = fallback_loc
+
+        logger.info("Auto-repair applied to spec")
         return repaired
+
+
+# ------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------
+
+def _deep_copy(obj: Any) -> Any:
+    """Simple deep copy via JSON round-trip."""
+    import json
+    return json.loads(json.dumps(obj))

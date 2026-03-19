@@ -1,55 +1,41 @@
 """
-Schema validation utilities
+Schema validation utilities.
 """
 
-import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
-from jsonschema import ValidationError, validate
-
-from .outcome import Outcome
+from .actor import Actor
 from .scenario import ScenarioSpec
+from .turn import NarratorOutput, NPCDecision, OffSceneNPCDecision
 
 
 def validate_scenario_spec(spec_data: Dict[str, Any]) -> ScenarioSpec:
-    """Validate and parse a scenario specification"""
+    """Validate and parse a scenario specification."""
     try:
-        # Create ScenarioSpec instance (Pydantic validation)
-        spec = ScenarioSpec(**spec_data)
-        return spec
+        return ScenarioSpec(**spec_data)
     except Exception as e:
         raise ValueError(f"Invalid scenario spec: {e}")
 
 
-def validate_outcome(outcome_data: Dict[str, Any]) -> Outcome:
-    """Validate and parse an outcome"""
+def validate_narrator_output(data: Dict[str, Any]) -> NarratorOutput:
+    """Validate and parse narrator LLM output."""
     try:
-        # Create Outcome instance (Pydantic validation)
-        outcome = Outcome(**outcome_data)
-        return outcome
+        return NarratorOutput(**data)
     except Exception as e:
-        raise ValueError(f"Invalid outcome: {e}")
+        raise ValueError(f"Invalid narrator output: {e}")
 
 
-def validate_json_schema(data: Dict[str, Any], schema: Dict[str, Any]) -> bool:
-    """Validate data against a JSON schema"""
+def validate_npc_decision(data: Dict[str, Any]) -> NPCDecision:
+    """Validate and parse an NPC decision LLM output."""
     try:
-        validate(instance=data, schema=schema)
-        return True
-    except ValidationError as e:
-        raise ValueError(f"JSON schema validation failed: {e}")
+        return NPCDecision(**data)
+    except Exception as e:
+        raise ValueError(f"Invalid NPC decision: {e}")
 
 
-def validate_no_scenario_nouns(
-    text: str, forbidden_nouns: Optional[List[str]] = None
-) -> bool:
-    """Validate that text contains no forbidden scenario nouns"""
-    if forbidden_nouns is None:
-        forbidden_nouns = []  # Empty list by default
-
-    text_lower = text.lower()
-    for noun in forbidden_nouns:
-        if noun.lower() in text_lower:
-            raise ValueError(f"Forbidden scenario noun found: {noun}")
-
-    return True
+def validate_off_scene_decision(data: Dict[str, Any]) -> OffSceneNPCDecision:
+    """Validate and parse an off-scene NPC decision."""
+    try:
+        return OffSceneNPCDecision(**data)
+    except Exception as e:
+        raise ValueError(f"Invalid off-scene NPC decision: {e}")

@@ -1,90 +1,52 @@
 """
-Outcome schema definitions for turn results
+Shared outcome primitives used by both the narrator and NPC decision schemas.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
+
+ALLOWED_OPS = {"set", "inc", "dec", "mul", "patch", "push", "pop", "addlog"}
 
 
 class StateChange(BaseModel):
-    """State change operation"""
+    """A single state mutation operation."""
 
-    op: str = Field(..., description="Operation type")
-    path: str = Field(..., description="JSON pointer path to modify")
-    value: Optional[Any] = Field(None, description="Value for the operation")
+    op: str = Field(..., description=f"Operation type: {', '.join(sorted(ALLOWED_OPS))}")
+    path: str = Field(
+        ...,
+        description="Dot-separated path to the value being modified, e.g. 'global_state.day'",
+    )
+    value: Optional[Any] = Field(None, description="Value to apply")
 
-    @validator("op")
-    def validate_op(cls, v):
-        allowed_ops = {"set", "inc", "dec", "mul", "patch", "push", "pop", "addlog"}
-        if v not in allowed_ops:
-            raise ValueError(f"Invalid operation: {v}. Must be one of {allowed_ops}")
+    @field_validator("op")
+    @classmethod
+    def validate_op(cls, v: str) -> str:
+        if v not in ALLOWED_OPS:
+            raise ValueError(f"Invalid op '{v}'. Must be one of: {sorted(ALLOWED_OPS)}")
         return v
 
 
 class VisibleDialogue(BaseModel):
-    """Visible dialogue between entities"""
+    """A line of dialogue spoken aloud in the scene."""
 
-    entity_id: str = Field(..., description="Entity identifier")
-    utterance: str = Field(..., description="What the entity says")
+    entity_id: str = Field(..., description="ID of the actor speaking")
+    utterance: str = Field(..., description="What they say")
 
 
 class RollRequest(BaseModel):
-    """Dice roll request"""
+    """A dice roll needed to resolve an uncertain outcome."""
 
-    kind: str = Field(..., description="Type of roll (e.g., 'd20', 'd6', 'custom')")
-    target: Optional[str] = Field(None, description="Target entity for the roll")
-    difficulty: int = Field(..., description="Difficulty class or target number")
-
-
-class HiddenMemoryUpdate(BaseModel):
-    """Hidden memory update for private thoughts"""
-
-    scope: str = Field(..., description="Memory scope (e.g., 'private', 'entity')")
-    target_id: str = Field(..., description="Target entity ID")
-    content: str = Field(..., description="Memory content")
-    visibility: str = Field(..., description="Visibility level")
-
-
-class EmotionalStateUpdate(BaseModel):
-    """Emotional state update for entities"""
-
-    entity_id: str = Field(
-        ..., description="Entity whose emotional state is being updated"
-    )
-    emotion: str = Field(
+    kind: str = Field(
         ...,
-        description="Primary emotion (joy, sadness, anger, fear, disgust, surprise, trust, anticipation)",
+        description="Skill or check type, e.g. 'persuasion', 'combat', 'stealth'",
     )
-    intensity: float = Field(..., description="Emotional intensity from -1.0 to 1.0")
-    cause: Optional[str] = Field(None, description="What caused this emotional state")
-    target_entity: Optional[str] = Field(
-        None, description="Entity this emotion is directed toward"
+    difficulty: int = Field(
+        ...,
+        ge=5,
+        le=20,
+        description="Difficulty class: 5=trivial, 10=moderate, 15=hard, 20=very hard",
     )
-
-
-class Outcome(BaseModel):
-    """Turn outcome from the narrator"""
-
-    narrative: str = Field(..., description="Visible narration text")
-    visible_dialogue: Optional[List[VisibleDialogue]] = Field(
-        None, description="Visible dialogue between entities"
+    target_id: Optional[str] = Field(
+        None, description="Actor ID being targeted, if any"
     )
-    state_changes: List[StateChange] = Field(
-        ..., description="List of state changes to apply"
-    )
-    roll_requests: Optional[List[RollRequest]] = Field(
-        None, description="Dice roll requests"
-    )
-    hidden_memory_updates: Optional[List[HiddenMemoryUpdate]] = Field(
-        None, description="Hidden memory updates"
-    )
-    emotional_state_updates: Optional[List[EmotionalStateUpdate]] = Field(
-        None, description="Emotional state updates for entities"
-    )
-    suggested_actions: Optional[List[str]] = Field(
-        None, description="Suggested actions for the player to take next"
-    )
-
-    class Config:
-        extra = "forbid"  # Reject unknown keys (additionalProperties: false)

@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import { Button } from './ui/Button';
 import { apiService } from '../services/api';
-import type { Session, TurnResponse, Entity } from '../services/api';
+import type { Session, TurnResponse, SessionCreateResponse } from '../services/api';
 import { Send, Loader2, Plus, Sparkles } from 'lucide-react';
 import { NarrativeMarkdown } from './NarrativeMarkdown';
 import Settings from './Settings';
@@ -34,7 +34,6 @@ export function Chat() {
   const [numCharacters, setNumCharacters] = useState(3);
   const [generateWorld, setGenerateWorld] = useState(true);
   const [generateEntityBackgrounds, setGenerateEntityBackgrounds] = useState(true);
-  const [useStreaming, setUseStreaming] = useState(true); // Enable streaming by default
   const { settings: localUserSettings } = useUserSettings();
   const [userSettings, setUserSettings] = useState<{ playerName: string; preferences: Record<string, unknown> }>({ playerName: '', preferences: {} });
   const [sidebarTab, setSidebarTab] = useState<'info' | 'relationships' | 'emotions'>('info');
@@ -160,22 +159,14 @@ export function Chat() {
       const scenario = await apiService.generateScenario(scenarioDescription);
       await apiService.compileScenario(scenario.id);
 
-      // Create session with config
-      const sessionResponse = await apiService.createSession({
+      // Create session
+      const sessionResponse: SessionCreateResponse = await apiService.createSession({
         scenario_id: scenario.id,
-        seed: Math.floor(Math.random() * 1000000),
-        config: {
-          num_characters: numCharacters,
-          generate_world_background: generateWorld,
-          generate_entity_backgrounds: generateEntityBackgrounds,
-          player_name: userSettings.playerName || undefined,
-          initial_entities: undefined,
-          custom_state: undefined
-        }
+        player_name: userSettings.playerName || undefined,
       });
 
-      // Fetch full session data (includes world_background, entities, etc.)
-      const fullSession = await apiService.getSession(sessionResponse.id);
+      // Fetch full session data
+      const fullSession = await apiService.getSession(sessionResponse.session_id);
       setCurrentSession(fullSession);
 
       // Create welcome message with world background
@@ -188,12 +179,12 @@ export function Chat() {
         },
       ];
 
-      // Add world background as a narrative message if available
-      if (fullSession.world_background) {
+      // Show opening narrative from session creation
+      if (sessionResponse.opening_narrative) {
         welcomeMessages.push({
           id: '2',
           role: 'assistant',
-          content: fullSession.world_background,
+          content: sessionResponse.opening_narrative,
           timestamp: new Date(),
           turnNumber: 0,
         });
@@ -224,109 +215,27 @@ export function Chat() {
     setIsLoading(true);
 
     try {
-      if (useStreaming) {
-        // Use streaming for real-time narrative
-        const assistantMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: '', // Will be filled as tokens arrive
-          timestamp: new Date(),
-          turnNumber: currentSession.turn + 1,
-          suggestedActions: undefined, // Will be set after streaming completes
-        };
-
-        setMessages((prev) => [...prev, assistantMessage]);
-
-        let fullContent = '';
-        let finalOutcome: TurnResponse | null = null;
-
-        try {
-          for await (const token of apiService.processTurnStreaming(currentSession.id, {
-            action: inputValue,
-            parameters: {},
-          })) {
-            fullContent += token;
-
-            // Update the message content as tokens arrive
-            setMessages((prev) => prev.map(msg =>
-              msg.id === assistantMessage.id
-                ? { ...msg, content: fullContent }
-                : msg
-            ));
-          }
-        } catch (streamError) {
-          console.error('Streaming failed, falling back to regular API:', streamError);
-          // Fall back to regular API if streaming fails
-          try {
-            const response: TurnResponse = await apiService.processTurn(currentSession.id, {
-              action: inputValue,
-              parameters: {},
-            });
-            finalOutcome = response;
-            fullContent = response.outcome.narrative;
-          } catch (fallbackError) {
-            console.error('Fallback API call also failed:', fallbackError);
-            fullContent = 'Both streaming and regular API failed. Please try again.';
-          }
-        }
-
-        // Update with final content and metadata
-        setMessages((prev) => prev.map(msg =>
-          msg.id === assistantMessage.id
-            ? {
-                ...msg,
-                content: fullContent,
-                suggestedActions: finalOutcome?.outcome.suggested_actions,
-              }
-            : msg
-        ));
-
-        // Refresh full session data to get updated entities and turn history
-        try {
-          const updatedSession = await apiService.getSession(currentSession.id);
-          console.log('Updated session entities:', updatedSession.entities?.length, 'entities');
-          if (updatedSession.entities) {
-            updatedSession.entities.forEach((e: Entity) => {
-              console.log(`  - ${e.id || e.name}: background=${e.background ? 'YES' : 'NO'}`);
-            });
-          }
-          setCurrentSession(updatedSession);
-        } catch (error) {
-          console.error('Failed to refresh session data:', error);
-          // Fallback to just updating turn count
-          setCurrentSession((prev) => (prev ? { ...prev, turn: currentSession.turn + 1 } : null));
-        }
-      } else {
-        // Use regular API call
+      {
         const response: TurnResponse = await apiService.processTurn(currentSession.id, {
           action: inputValue,
-          parameters: {},
         });
 
         const assistantMessage: Message = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: response.outcome.narrative,
+          content: response.narrative,
           timestamp: new Date(),
           turnNumber: response.turn,
-          suggestedActions: response.outcome.suggested_actions,
+          suggestedActions: response.suggested_actions,
         };
 
         setMessages((prev) => [...prev, assistantMessage]);
 
-        // Refresh full session data to get updated entities and turn history
+        // Refresh session to pick up updated turn count and actor states
         try {
           const updatedSession = await apiService.getSession(currentSession.id);
-          console.log('Updated session entities:', updatedSession.entities?.length, 'entities');
-          if (updatedSession.entities) {
-            updatedSession.entities.forEach((e: Entity) => {
-              console.log(`  - ${e.id || e.name}: background=${e.background ? 'YES' : 'NO'}`);
-            });
-          }
           setCurrentSession(updatedSession);
-        } catch (error) {
-          console.error('Failed to refresh session data:', error);
-          // Fallback to just updating turn count
+        } catch {
           setCurrentSession((prev) => (prev ? { ...prev, turn: response.turn } : null));
         }
       }
@@ -457,14 +366,6 @@ export function Chat() {
                       className="flex-1"
                     >
                       {showAdvanced ? '▼ Hide' : '▶ Show'} Advanced Options
-                    </Button>
-                    <Button
-                      variant={useStreaming ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => setUseStreaming(!useStreaming)}
-                      className="flex-1"
-                    >
-                      {useStreaming ? "📡 Streaming" : "⚡ Instant"}
                     </Button>
                   </div>
 

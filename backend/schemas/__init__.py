@@ -1,36 +1,56 @@
 """
-JSON schemas and validation for the Dynamic CYOA Engine
+Schemas for QuietStories.
 """
 
-from .outcome import (
-    HiddenMemoryUpdate,
-    Outcome,
-    RollRequest,
-    StateChange,
-    VisibleDialogue,
+from .actor import Actor, Goal, Relationship, SeedMemory
+from .outcome import RollRequest, StateChange, VisibleDialogue
+from .scenario import Faction, Location, LossCondition, ScenarioSpec, WinCondition, WorldSpec
+from .turn import (
+    MemoryEntry,
+    NarratorOutput,
+    NPCAction,
+    NPCDecision,
+    OffSceneNPCDecision,
+    RollResult,
+    TurnInput,
+    TurnOutput,
 )
-from .scenario import (
-    Action,
-    EffectOp,
-    LossCondition,
-    NegativityBudget,
-    RandomEvent,
-    ScenarioSpec,
+from .validation import (
+    validate_narrator_output,
+    validate_npc_decision,
+    validate_off_scene_decision,
+    validate_scenario_spec,
 )
-from .validation import validate_outcome, validate_scenario_spec
 
 __all__ = [
+    # Actor
+    "Actor",
+    "Goal",
+    "Relationship",
+    "SeedMemory",
+    # Scenario
     "ScenarioSpec",
-    "Action",
-    "RandomEvent",
-    "EffectOp",
+    "WorldSpec",
+    "Location",
+    "Faction",
+    "WinCondition",
     "LossCondition",
-    "NegativityBudget",
-    "Outcome",
+    # Outcome primitives
     "StateChange",
-    "RollRequest",
-    "HiddenMemoryUpdate",
     "VisibleDialogue",
+    "RollRequest",
+    # Turn
+    "TurnInput",
+    "TurnOutput",
+    "NarratorOutput",
+    "NPCDecision",
+    "NPCAction",
+    "OffSceneNPCDecision",
+    "MemoryEntry",
+    "RollResult",
+    # Validation
     "validate_scenario_spec",
-    "validate_outcome",
+    "validate_narrator_output",
+    "validate_npc_decision",
+    "validate_off_scene_decision",
 ]
